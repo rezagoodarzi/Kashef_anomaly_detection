@@ -42,7 +42,6 @@ def prepare_inputs_for_date(rtwp_csv, pathloss_csv, anomaly_csv, target_date):
     anom_df = pd.read_csv(anomaly_csv, parse_dates=['DATE_KEY'])
     
     # 2) Compute Mapped_ID
-    rtwp_df['Mapped_ID'] = rtwp_df['NE_NAME'].str[:2] + rtwp_df['NE_NAME'].str[4:-1]
     anom_df['Mapped_ID'] = anom_df['name'].str[:2] + anom_df['name'].str[4:-1]
     
     # 3) Extract anomaly mapped IDs
@@ -51,12 +50,11 @@ def prepare_inputs_for_date(rtwp_csv, pathloss_csv, anomaly_csv, target_date):
     print("Anomaly DF columns:", anom_df.columns.tolist())
     print("Mapped anomalies:", anomaly_sectors)
     # 4) Build DATETIME and filter to target_date
-    rtwp_df['DATE_KEY'] = rtwp_df['DATE_KEY'].astype(str)
-    rtwp_df['HOUR_KEY'] = rtwp_df['HOUR_KEY'].astype(int).astype(str).str.zfill(2)
-    dt_series = rtwp_df['DATE_KEY'] + rtwp_df['HOUR_KEY']
-    rtwp_df['DATETIME'] = pd.to_datetime(dt_series, format='%Y%m%d%H', errors='coerce')
     # filter by date
-    rtwp_date = rtwp_df[rtwp_df['DATE_KEY'] == (target_date)]
+    target_date_dt = pd.to_datetime(target_date, format="%Y%m%d").date()
+    rtwp_df['DATETIME'] = pd.to_datetime(rtwp_df['DATETIME'], errors='coerce')
+
+    rtwp_date = rtwp_df[rtwp_df['DATETIME'].dt.date == target_date_dt]
     print("rtwp_date :" )
     print(rtwp_date)
     # 5) Filter pathloss to only anomaly mapped sectors, keep rank ≤ 30
