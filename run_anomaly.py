@@ -129,11 +129,11 @@ class PathLossWeightedCoehaviorAnalyzer:
         
         # Combined weighted similarity
         weights = {
-            'pearson': 0.65,
-            'spearman': 0.10,
-            'dtw': 0.15,
-            'change_pattern': 0,
-            'synchronization': 0.10
+            'pearson': 0.1,
+            'spearman': 0,
+            'dtw': 0,
+            'change_pattern': 0.5,
+            'synchronization': 0.4
         }
         
         combined_similarity = sum(similarities[key] * weights[key] for key in weights)
