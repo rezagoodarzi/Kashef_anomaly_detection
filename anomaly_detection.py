@@ -12,7 +12,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class PathLossWeightedCoehaviorAnalyzer:
-    def __init__(self, path_loss_threshold=130, similarity_threshold=0.7, 
+    def __init__(self, path_loss_threshold=120, similarity_threshold=0.7, 
                  causality_threshold=0.05, min_cluster_size=2):
         """
         Initialize the analyzer with configurable thresholds
@@ -114,7 +114,7 @@ class PathLossWeightedCoehaviorAnalyzer:
             similarities['synchronization'] = 0
         
         weights = {
-            'pearson': 0.3,
+            'pearson': 0.4,
             'spearman': 0.01,
             'dtw': 0.05,
             'change_pattern': 0.6,
@@ -341,7 +341,7 @@ def run_daily_analysis(rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids)
     - report: human-readable report
     """
     analyzer = PathLossWeightedCoehaviorAnalyzer(
-        path_loss_threshold=130,  # dB
+        path_loss_threshold=120,  # dB
         similarity_threshold=0.5,
         causality_threshold=0.05,
         min_cluster_size=2

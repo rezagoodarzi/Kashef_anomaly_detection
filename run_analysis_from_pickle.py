@@ -1,5 +1,5 @@
 import pickle
-from run_anomaly import run_daily_analysis
+from anomaly_detection import run_daily_analysis
 
 # Load prepared data
 with open("prepared_data.pkl", "rb") as f:
