@@ -6,7 +6,7 @@ from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import cosine_similarity
 from dtaidistance import dtw
-import ruptures as rpt
+import pelt_copy
 from statsmodels.tsa.stattools import grangercausalitytests
 import warnings
 warnings.filterwarnings('ignore')
@@ -135,7 +135,7 @@ class PathLossWeightedCoehaviorAnalyzer:
         Detect change points in RTWP time series
         """
         try:
-            algo = rpt.Pelt(model="rbf").fit(rtwp_data)
+            algo = pelt_copy.Pelt(model="rbf").fit(rtwp_data)
             change_points = algo.predict(pen=10)
             return change_points[:-1]  
         except:
