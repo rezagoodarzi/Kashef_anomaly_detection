@@ -109,8 +109,8 @@ def prepare_inputs_for_date(rtwp_csv, pathloss_csv, anomaly_csv, target_date):
 rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids = prepare_inputs_for_date(
     rtwp_csv='Esfehan_RSSI_merged_avg_carriers_2U_filled.csv',
     pathloss_csv='Data_bridge_ESFAHAN.Neighbors_3G_3G.csv',
-    anomaly_csv='1.csv',
-    target_date='20250701'
+    anomaly_csv='2.csv',
+    target_date='20250702'
 )
 print("RTWP Data:", rtwp_data)
 print("Path Loss Matrix:", path_loss_matrix)
