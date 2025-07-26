@@ -176,10 +176,8 @@ class PathLossWeightedCoehaviorAnalyzer:
         Returns:
         - Analysis results with clusters and propagation patterns
         """
-        # Calculate influence weights
         influence_weights, valid_connections = self.calculate_influence_weights(path_loss_matrix)
         
-        # Create sector ID to index mapping
         sector_to_idx = {sector_id: idx for idx, sector_id in enumerate(sector_ids)}
         
         results = {
@@ -191,7 +189,6 @@ class PathLossWeightedCoehaviorAnalyzer:
             'affected_sectors': set()
         }
         
-        # For each anomalous sector, analyze its influence network
         for anomaly_sector in anomaly_sectors:
             if anomaly_sector not in sector_to_idx:
                 continue
@@ -205,7 +202,6 @@ class PathLossWeightedCoehaviorAnalyzer:
                 'neighbors': {}      # store neighbors too
             }
             '''
-            # Find sectors within path loss threshold
             connected_sectors = []
             for i, sector_id in enumerate(sector_ids):
                 if (i != anomaly_idx and 
@@ -213,7 +209,6 @@ class PathLossWeightedCoehaviorAnalyzer:
                     sector_id in rtwp_data):
                     connected_sectors.append((sector_id, i))
             
-            # Calculate similarities with connected sectors
             similarities = {}
             causality_results = {}
             
@@ -264,7 +259,6 @@ class PathLossWeightedCoehaviorAnalyzer:
             results['similarity_matrix'][anomaly_sector] = similarities
             results['causality_results'][anomaly_sector] = causality_results
             
-            # Propagation analysis
             propagation_analysis = {
                 'primary_affected': [s for s in affected_sectors 
                                    if similarities[s]['weighted_similarity'] >= 0.8],
@@ -325,7 +319,6 @@ class PathLossWeightedCoehaviorAnalyzer:
         
         return "\n".join(report)
 
-# Example usage function
 def run_daily_analysis(rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids):
     """
     Run the complete daily anomaly analysis
@@ -367,14 +360,14 @@ def create_example_data():
         sector_id = f"sector_{i:02d}"
         base_rtwp = np.random.normal(-95, 10, 24)
         
-        if i < 5:  # First 5 sectors have correlated anomalies
+        if i < 5:  
             anomaly_pattern = np.sin(np.linspace(0, 4*np.pi, 24)) * 5
             base_rtwp += anomaly_pattern
         
         rtwp_data[sector_id] = base_rtwp
     
     path_loss_matrix = np.random.uniform(80, 140, (30, 30))
-    np.fill_diagonal(path_loss_matrix, 0)  # No self path loss
+    np.fill_diagonal(path_loss_matrix, 0)  
     
     path_loss_matrix = (path_loss_matrix + path_loss_matrix.T) / 2
     
