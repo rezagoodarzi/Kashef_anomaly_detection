@@ -86,7 +86,7 @@ class PathLossWeightedCoehaviorAnalyzer:
             similarities['spearman'] = abs(spearman_corr) if not np.isnan(spearman_corr) else 0
         else:
             similarities['spearman'] = 0
-        
+        '''
         try:
             dtw_distance = dtw.distance(sector_data, neighbor_data)
             max_possible_dtw = len(sector_data) * max(np.std(sector_data), np.std(neighbor_data))
@@ -94,6 +94,7 @@ class PathLossWeightedCoehaviorAnalyzer:
             similarities['dtw'] = dtw_similarity
         except:
             similarities['dtw'] = 0
+        '''
         
         sector_changes = np.diff(sector_data)
         neighbor_changes = np.diff(neighbor_data)
@@ -105,6 +106,7 @@ class PathLossWeightedCoehaviorAnalyzer:
             similarities['change_pattern'] = 0
         
         # 5. Synchronization of extreme events
+        '''
         sector_extremes = np.abs(sector_data - np.mean(sector_data)) > 2 * np.std(sector_data)
         neighbor_extremes = np.abs(neighbor_data - np.mean(neighbor_data)) > 2 * np.std(neighbor_data)
         if np.any(sector_extremes) or np.any(neighbor_extremes):
@@ -112,16 +114,27 @@ class PathLossWeightedCoehaviorAnalyzer:
             similarities['synchronization'] = sync_score
         else:
             similarities['synchronization'] = 0
+        '''
         
+        # 6. diff 2
+        sector_vlocity = np.diff(sector_changes)
+        neighbor_vlocity = np.diff(neighbor_changes)
+        if len(sector_vlocity) > 1:
+            vlocity_corr, _ = stats.pearsonr(sector_vlocity, neighbor_vlocity)
+            similarities['vlocity_pattern'] = abs(vlocity_corr) if not np.isnan(vlocity_corr) else 0
+        else:
+            similarities['vlocity_pattern'] = 0
+            
         weights = {
-            'pearson': 0.4,
+            'pearson': 1,
             'spearman': 0.01,
-            'dtw': 0.05,
-            'change_pattern': 0.8,
-            'synchronization': 0.04
+            #                              'dtw': 0.05,
+            'change_pattern': 1,
+            #'synchronization': 0.01,
+            'vlocity_pattern': 1
         }
         
-        combined_similarity = sum(similarities[key] * weights[key] for key in weights)
+        combined_similarity = max(similarities[key] * weights[key] for key in weights)
         
         # influence_weight temporary deleted 
         # weighted_similarity = combined_similarity * influence_weight
@@ -186,7 +199,8 @@ class PathLossWeightedCoehaviorAnalyzer:
             'similarity_matrix': {},
             'change_points': {} ,  
             'causality_results': {},
-            'affected_sectors': set()
+            'affected_sectors': set(),
+            'raw_similarity': {}
         }
         
         for anomaly_sector in anomaly_sectors:
@@ -211,14 +225,14 @@ class PathLossWeightedCoehaviorAnalyzer:
             
             similarities = {}
             causality_results = {}
-            
+            results['raw_similarity'][anomaly_sector] = {}      # STEP 1
+
             for sector_id, sector_idx in connected_sectors:
                 neighbor_data = rtwp_data[sector_id]
                # cp_neighbor = self.detect_change_points(neighbor_data)
                # results['change_points'][anomaly_sector]['neighbors'][sector_id] = cp_neighbor
                 influence_weight = influence_weights[anomaly_idx, sector_idx]
                 
-                # Calculate weighted similarity
                 weighted_sim, detailed_sims = self.calculate_weighted_similarity(
                     anomaly_data, neighbor_data, influence_weight
                 )
@@ -238,7 +252,8 @@ class PathLossWeightedCoehaviorAnalyzer:
                     'is_causal': is_causal,
                     'p_value': p_value
                 }
-            
+                results['raw_similarity'][anomaly_sector][sector_id] = detailed_sims
+    
             # Identify affected sectors (high similarity or causal relationship)
             affected_sectors = []
             for sector_id in similarities:
@@ -258,7 +273,6 @@ class PathLossWeightedCoehaviorAnalyzer:
             results['clusters'][anomaly_sector] = affected_sectors
             results['similarity_matrix'][anomaly_sector] = similarities
             results['causality_results'][anomaly_sector] = causality_results
-            
             propagation_analysis = {
                 'primary_affected': [s for s in affected_sectors 
                                    if similarities[s]['weighted_similarity'] >= 0.8],
@@ -335,7 +349,7 @@ def run_daily_analysis(rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids)
     """
     analyzer = PathLossWeightedCoehaviorAnalyzer(
         path_loss_threshold=130,  # dB
-        similarity_threshold=0.5,
+        similarity_threshold=0.64,
         causality_threshold=0.05,
         min_cluster_size=2
     )

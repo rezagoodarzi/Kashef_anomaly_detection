@@ -20,7 +20,7 @@ esfahan_grouped = esfahan_df.drop_duplicates(subset='Mapped_ID')[['Mapped_ID', '
 position_dict = esfahan_grouped.set_index('Mapped_ID')[['LATITUDE', 'LONGITUDE', 'AZIMUTH']].to_dict('index')
 
 # Simulated results for testing
-with open("daily_analysis_results0.9_2.pkl", "rb") as f:
+with open("daily_analysis_results0.9_2_0.7.pkl", "rb") as f:
     results = pickle.load(f)
 
 anomaly_sectors = list(results['propagation_analysis'].keys())
@@ -63,13 +63,17 @@ for node, data in position_dict.items():
         fill_opacity=0.8,
         popup=f"{node} - Azimuth: {data['AZIMUTH']}"
     ).add_to(m)
+    arrow_scale = 0.003  # adjust arrow length as you wish
 
     # Draw azimuth direction
-    azimuth_rad = np.deg2rad(data['AZIMUTH'])
-    dx = 0.003 * np.cos(azimuth_rad)
-    dy = 0.003 * np.sin(azimuth_rad)
-    end_lat = data['LATITUDE'] + dy
-    end_lon = data['LONGITUDE'] + dx
+    theta = np.deg2rad(data['AZIMUTH'])          # 0° = North
+    dlat  =  arrow_scale * np.cos(theta)         # Δlat north–south
+    # correct longitude step by cos(lat) to keep a consistent ground distance
+    dlon  = (arrow_scale * np.sin(theta) /
+             np.cos(np.deg2rad(data['LATITUDE'])))
+
+    end_lat = data['LATITUDE'] + dlat
+    end_lon = data['LONGITUDE'] + dlon
 
     folium.PolyLine(
         locations=[[data['LATITUDE'], data['LONGITUDE']], [end_lat, end_lon]],
@@ -96,4 +100,4 @@ def draw_edges(edge_list, color):
 draw_edges(primary_edges, 'red')
 draw_edges(secondary_edges, 'orange')
 
-m.save("anomaly_propagation_map_130_2.html")
+m.save("anomaly_propagation_map_130_2_0.7_test.html")

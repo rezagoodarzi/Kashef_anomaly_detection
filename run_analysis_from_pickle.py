@@ -20,9 +20,8 @@ results, report = run_daily_analysis(
 
 print("📊 Analysis report:\n")
 print(report)
-
 # Optionally save report & results
-with open("daily_analysis_report_0.9_2.txt", "w") as f:
+with open("daily_analysis_report_0.9_2_0.7.txt", "w") as f:
     f.write(report)
-with open("daily_analysis_results0.9_2.pkl", "wb") as f:
+with open("daily_analysis_results0.9_2_0.7.pkl", "wb") as f:
     pickle.dump(results, f)
