@@ -333,7 +333,10 @@ class PathLossWeightedCoehaviorAnalyzer:
         
         return "\n".join(report)
 
-def run_daily_analysis(rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids):
+def run_daily_analysis(rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids, path_loss_threshold=130,  # dB
+        similarity_threshold=0.64,
+        causality_threshold=0.05,
+        min_cluster_size=2):
     """
     Run the complete daily anomaly analysis
     
@@ -348,10 +351,10 @@ def run_daily_analysis(rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids)
     - report: human-readable report
     """
     analyzer = PathLossWeightedCoehaviorAnalyzer(
-        path_loss_threshold=130,  # dB
-        similarity_threshold=0.64,
-        causality_threshold=0.05,
-        min_cluster_size=2
+        path_loss_threshold,  # dB
+        similarity_threshold,
+        causality_threshold,
+        min_cluster_size
     )
     
     results = analyzer.analyze_daily_anomalies(
