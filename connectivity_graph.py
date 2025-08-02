@@ -69,8 +69,8 @@ nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=200, alpha=0.95
 nx.draw_networkx_edges(G, pos, edge_color=edge_colors, arrows=True, width=1.8)
 nx.draw_networkx_labels(G, pos, font_size=7)
 
-plt.title("Sector Co-behavior & Propagation Connectivity Graph")
-plt.axis("off")
-plt.tight_layout()
-plt.savefig("sector_connectivity_graph.png", dpi=300)
-plt.show()
+#plt.title("Sector Co-behavior & Propagation Connectivity Graph")
+#plt.axis("off")
+#plt.tight_layout()
+#plt.savefig("sector_connectivity_graph.png", dpi=300)
+#plt.show()

@@ -135,5 +135,5 @@ def simulate_sector_map_data(position_dict,results,cluster_output ="cluster_impo
 
     draw_edges(primary_edges, 'red')
     draw_edges(secondary_edges, 'orange')
-
     m.save(graph_output)
+    return connected_nodes
