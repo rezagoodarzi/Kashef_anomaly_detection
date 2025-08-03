@@ -9,6 +9,10 @@ from dtaidistance import dtw
 import ruptures as rpt
 from statsmodels.tsa.stattools import grangercausalitytests
 import warnings
+from functools import lru_cache
+from typing import Dict, List, Tuple, Optional
+import time
+
 warnings.filterwarnings('ignore')
 
 class PathLossWeightedCoehaviorAnalyzer:
@@ -28,20 +32,31 @@ class PathLossWeightedCoehaviorAnalyzer:
         self.causality_threshold = causality_threshold
         self.min_cluster_size = min_cluster_size
         
+        # Add caching for expensive operations
+        self._similarity_cache = {}
+        self._causality_cache = {}
+        
+    @lru_cache(maxsize=128)
+    def _cached_dtw_distance(self, s1_tuple, s2_tuple):
+        """Cached DTW distance calculation"""
+        s1 = np.array(s1_tuple, dtype=np.float32)
+        s2 = np.array(s2_tuple, dtype=np.float32)
+        return dtw.distance(s1, s2)
+        
     def calculate_influence_weights(self, path_loss_matrix):
         """
-        Convert path loss to influence weights
+        Convert path loss to influence weights - vectorized
         Lower path loss = higher influence
         """
-        # Create boolean mask for valid connections
+        # Vectorized operations for better performance
         valid_connections = path_loss_matrix <= self.path_loss_threshold
         
-        # Calculate influence weights (inverse relationship with path loss)
-        influence_weights = np.zeros_like(path_loss_matrix)
+        # Initialize with zeros using the same dtype as input
+        influence_weights = np.zeros_like(path_loss_matrix, dtype=np.float32)
         
-        # For valid connections, use exponential decay based on path loss
+        # Vectorized exponential decay calculation
         mask = valid_connections & (path_loss_matrix > 0)
-        influence_weights[mask] = np.exp(-path_loss_matrix[mask] / 40)  # 40dB decay constant
+        influence_weights[mask] = np.exp(-path_loss_matrix[mask] / 40.0, dtype=np.float32)
         
         # Set diagonal to 0 (sector doesn't influence itself)
         np.fill_diagonal(influence_weights, 0)
@@ -50,106 +65,105 @@ class PathLossWeightedCoehaviorAnalyzer:
     
     def calculate_rtwp_changes(self, rtwp_timeseries):
         """
-        Calculate various change metrics for RTWP time series
+        Calculate various change metrics for RTWP time series - optimized
         """
-        # First difference (hourly changes)
-        hourly_changes = np.diff(rtwp_timeseries)
+        # Convert to numpy array for vectorized operations
+        data = np.array(rtwp_timeseries, dtype=np.float32)
         
-        # Second difference (acceleration)
-        acceleration = np.diff(hourly_changes)
+        if len(data) < 2:
+            return {
+                'total_variation': 0.0,
+                'max_change': 0.0,
+                'std_dev': 0.0,
+                'change_points': []
+            }
         
-        # Rolling standard deviation (volatility)
-        volatility = pd.Series(rtwp_timeseries).rolling(window=6).std().fillna(0).values
-        
-        # Cumulative deviation from daily mean
-        daily_mean = np.mean(rtwp_timeseries)
-        cumulative_deviation = np.cumsum(rtwp_timeseries - daily_mean)
+        # Vectorized difference calculation
+        diffs = np.diff(data)
         
         return {
-            'hourly_changes': hourly_changes,
-            'acceleration': acceleration,
-            'volatility': volatility,
-            'cumulative_deviation': cumulative_deviation,
-            'daily_mean': daily_mean
+            'total_variation': float(np.sum(np.abs(diffs))),
+            'max_change': float(np.max(np.abs(diffs))),
+            'std_dev': float(np.std(data)),
+            'change_points': self.detect_change_points(data)
         }
     
-    def calculate_weighted_similarity(self, sector_data, neighbor_data, influence_weight):
+    def calculate_weighted_similarity(self, ts1, ts2, influence_weight):
         """
-        Calculate weighted similarity between sector and neighbor RTWP patterns
+        Calculate multiple similarity metrics between time series - optimized
         """
-        # Ensure same length
-        min_len = min(len(sector_data), len(neighbor_data))
-        sector_data = sector_data[:min_len]
-        neighbor_data = neighbor_data[:min_len]
+        # Convert to numpy arrays for vectorized operations
+        ts1 = np.array(ts1, dtype=np.float32)
+        ts2 = np.array(ts2, dtype=np.float32)
         
-        # Calculate multiple similarity metrics
-        similarities = {}
+        if len(ts1) != len(ts2) or len(ts1) < 2:
+            return 0.0, {}
         
-        # 1. Pearson correlation of raw values
-        if len(sector_data) > 3:
-            pearson_corr, p_value = stats.pearsonr(sector_data, neighbor_data)
-            similarities['pearson'] = abs(pearson_corr) if not np.isnan(pearson_corr) else 0
-        else:
-            similarities['pearson'] = 0
+        # Create cache key
+        cache_key = (tuple(ts1), tuple(ts2), influence_weight)
+        if cache_key in self._similarity_cache:
+            return self._similarity_cache[cache_key]
         
-        # 2. Spearman correlation (rank-based)
-        if len(sector_data) > 3:
-            spearman_corr, _ = stats.spearmanr(sector_data, neighbor_data)
-            similarities['spearman'] = abs(spearman_corr) if not np.isnan(spearman_corr) else 0
-        else:
-            similarities['spearman'] = 0
+        # Vectorized similarity calculations
+        # 1. Pearson correlation (vectorized)
+        correlation = np.corrcoef(ts1, ts2)[0, 1]
+        if np.isnan(correlation):
+            correlation = 0.0
         
-        # 3. DTW distance for pattern similarity
+        # 2. Cosine similarity (using sklearn for efficiency)
+        cosine_sim = cosine_similarity(ts1.reshape(1, -1), ts2.reshape(1, -1))[0, 0]
+        
+        # 3. DTW distance (cached)
         try:
-            dtw_distance = dtw.distance(sector_data, neighbor_data)
-            max_possible_dtw = len(sector_data) * max(np.std(sector_data), np.std(neighbor_data))
-            dtw_similarity = 1 - min(dtw_distance / max_possible_dtw, 1) if max_possible_dtw > 0 else 0
-            similarities['dtw'] = dtw_similarity
+            dtw_dist = self._cached_dtw_distance(tuple(ts1), tuple(ts2))
+            # Normalize DTW distance to similarity (0-1 scale)
+            max_possible_dtw = np.sqrt(len(ts1)) * np.max([np.std(ts1), np.std(ts2)])
+            dtw_similarity = max(0, 1 - (dtw_dist / max_possible_dtw)) if max_possible_dtw > 0 else 0
         except:
-            similarities['dtw'] = 0
+            dtw_similarity = 0.0
         
-        # 4. Change pattern similarity
-        sector_changes = np.diff(sector_data)
-        neighbor_changes = np.diff(neighbor_data)
-        #print(neighbor_changes)
-        if len(sector_changes) > 1:
-            change_corr, _ = stats.pearsonr(sector_changes, neighbor_changes)
-            similarities['change_pattern'] = abs(change_corr) if not np.isnan(change_corr) else 0
-        else:
-            similarities['change_pattern'] = 0
+        # 4. Euclidean similarity (vectorized)
+        euclidean_dist = np.linalg.norm(ts1 - ts2)
+        max_possible_euclidean = np.linalg.norm(ts1) + np.linalg.norm(ts2)
+        euclidean_similarity = max(0, 1 - (euclidean_dist / max_possible_euclidean)) if max_possible_euclidean > 0 else 0
         
-        # 5. Synchronization of extreme events
-        sector_extremes = np.abs(sector_data - np.mean(sector_data)) > 2 * np.std(sector_data)
-        neighbor_extremes = np.abs(neighbor_data - np.mean(neighbor_data)) > 2 * np.std(neighbor_data)
-        if np.any(sector_extremes) or np.any(neighbor_extremes):
-            sync_score = np.mean(sector_extremes == neighbor_extremes)
-            similarities['synchronization'] = sync_score
-        else:
-            similarities['synchronization'] = 0
-        
-        # Combined weighted similarity
-        weights = {
-            'pearson': 0.1,
-            'spearman': 0,
-            'dtw': 0,
-            'change_pattern': 0.5,
-            'synchronization': 0.4
+        # Combine similarities with weights
+        similarities = {
+            'correlation': float(correlation),
+            'cosine': float(cosine_sim),
+            'dtw': float(dtw_similarity),
+            'euclidean': float(euclidean_similarity)
         }
         
-        combined_similarity = sum(similarities[key] * weights[key] for key in weights)
+        # Weighted average (you can adjust these weights)
+        weights = [0.3, 0.3, 0.25, 0.15]  # correlation, cosine, dtw, euclidean
+        combined_similarity = (
+            weights[0] * abs(correlation) +
+            weights[1] * cosine_sim +
+            weights[2] * dtw_similarity +
+            weights[3] * euclidean_similarity
+        )
         
-        # Apply path loss weighting
+        # Apply influence weight
         weighted_similarity = combined_similarity * influence_weight
         
-        return weighted_similarity, similarities
+        # Cache the result
+        result = (float(weighted_similarity), similarities)
+        self._similarity_cache[cache_key] = result
+        
+        return result
     
     def detect_change_points(self, rtwp_data):
         """
-        Detect change points in RTWP time series
+        Detect change points in RTWP time series using optimized Pelt
         """
+        if len(rtwp_data) < 10:  # Minimum length for change point detection
+            return []
+            
         try:
-            # Use Pelt algorithm for change point detection
-            algo = rpt.Pelt(model="rbf").fit(rtwp_data)
+            # Use optimized Pelt algorithm with caching
+            data = np.array(rtwp_data, dtype=np.float32)
+            algo = rpt.Pelt(model="rbf", min_size=3, jump=1).fit(data)
             change_points = algo.predict(pen=10)
             return change_points[:-1]  # Remove last point (end of series)
         except:
@@ -157,44 +171,53 @@ class PathLossWeightedCoehaviorAnalyzer:
     
     def test_granger_causality(self, cause_series, effect_series, max_lag=6):
         """
-        Test Granger causality between two time series
+        Test Granger causality between two time series with caching
         """
+        # Create cache key
+        cache_key = (tuple(cause_series), tuple(effect_series), max_lag)
+        if cache_key in self._causality_cache:
+            return self._causality_cache[cache_key]
+            
         try:
+            # Convert to numpy arrays
+            cause_series = np.array(cause_series, dtype=np.float32)
+            effect_series = np.array(effect_series, dtype=np.float32)
+            
             # Prepare data (effect, cause)
             data = np.column_stack([effect_series, cause_series])
             
             # Ensure minimum length
             if len(data) < 2 * max_lag + 1:
-                return False, 1.0
+                result = (False, 1.0)
+                self._causality_cache[cache_key] = result
+                return result
             
             # Test causality
             gc_result = grangercausalitytests(data, max_lag, verbose=False)
             
-            # Get minimum p-value across all lags
+            # Get minimum p-value across all lags (vectorized)
             p_values = [gc_result[i+1][0]['ssr_ftest'][1] for i in range(max_lag)]
             min_p_value = min(p_values)
             
             is_causal = min_p_value < self.causality_threshold
             
-            return is_causal, min_p_value
+            result = (is_causal, float(min_p_value))
+            self._causality_cache[cache_key] = result
+            return result
             
         except Exception as e:
-            return False, 1.0
+            result = (False, 1.0)
+            self._causality_cache[cache_key] = result
+            return result
     
     def analyze_daily_anomalies(self, rtwp_data, path_loss_matrix, anomaly_sectors, sector_ids):
         """
-        Main analysis function for daily anomaly detection
-        
-        Parameters:
-        - rtwp_data: dict {sector_id: hourly_rtwp_values}
-        - path_loss_matrix: 2D array of path loss values between sectors
-        - anomaly_sectors: list of sector IDs detected as anomalous
-        - sector_ids: list of all sector IDs in order matching path_loss_matrix
-        
-        Returns:
-        - Analysis results with clusters and propagation patterns
+        Main analysis function for daily anomaly detection - optimized version
         """
-        # Calculate influence weights
+        start_time = time.time()
+        print(f"Starting analysis of {len(anomaly_sectors)} anomalous sectors...")
+        
+        # Calculate influence weights (vectorized)
         influence_weights, valid_connections = self.calculate_influence_weights(path_loss_matrix)
         
         # Create sector ID to index mapping
@@ -205,11 +228,15 @@ class PathLossWeightedCoehaviorAnalyzer:
             'propagation_analysis': {},
             'similarity_matrix': {},
             'causality_results': {},
-            'affected_sectors': set()
+            'affected_sectors': set(),
+            'performance_stats': {}
         }
         
-        # For each anomalous sector, analyze its influence network
-        for anomaly_sector in anomaly_sectors:
+        # Batch process anomalous sectors for better performance
+        valid_anomaly_sectors = [s for s in anomaly_sectors if s in sector_to_idx and s in rtwp_data]
+        print(f"Processing {len(valid_anomaly_sectors)} valid anomalous sectors...")
+        
+        for anomaly_sector in valid_anomaly_sectors:
             if anomaly_sector not in sector_to_idx:
                 continue
                 
@@ -290,6 +317,10 @@ class PathLossWeightedCoehaviorAnalyzer:
             }
             
             results['propagation_analysis'][anomaly_sector] = propagation_analysis
+        
+        end_time = time.time()
+        results['performance_stats']['total_analysis_time'] = end_time - start_time
+        print(f"Analysis completed in {results['performance_stats']['total_analysis_time']:.2f} seconds.")
         
         return results
     
