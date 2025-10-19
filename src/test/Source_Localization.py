@@ -217,6 +217,16 @@ class NeighborAnalyzer:
         peaks1, _ = find_peaks(series1, height=-94)
         peaks2, _ = find_peaks(series2, height=-94)
         
+        changes1 = self.find_changepoints_pelt(series1)
+        changes2 = self.find_changepoints_pelt(series2)
+        
+        if len(changes1) > 0 and len(changes2) > 0:
+            # Check if change points occur at similar times
+            change_overlap = len(set(changes1) & set(changes2)) / max(len(changes1), len(changes2))
+            features['change_alignment'] = change_overlap
+        else:
+            features['change_alignment'] = 0
+
         if len(peaks1) > 0 and len(peaks2) > 0:
             # Check if peaks occur at similar times
             peak_overlap = len(set(peaks1) & set(peaks2)) / max(len(peaks1), len(peaks2))
@@ -270,11 +280,12 @@ class NeighborAnalyzer:
             # Determine if correlated
             score = (
                 corr_features['pearson_corr'] * 0.4 +
-                corr_features['diff_corr'] * 0.3 +
-                corr_features['peak_alignment'] * 0.3
+                corr_features['diff_corr'] * 0.2 +
+                corr_features['peak_alignment'] * 0.3 + 
+                corr_features['change_alignment'] * 0.5
             )
             
-            if score > threshold or corr_features['pearson_corr'] > 0.7:
+            if score > threshold or corr_features['pearson_corr'] > 0.7 or corr_features['change_alignment'] > 0.6:
                 # Get sector info
                 sector_info = neighbor_data.iloc[-1]
                 
