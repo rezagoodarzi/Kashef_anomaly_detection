@@ -12,7 +12,8 @@ from pathlib import Path
 rssi_kj_path = r'C:\Users\Reza\Documents\GitHub\Kashef_anomaly\Kashef_anomaly_detection\data\KJ_ne_site_anomaly_no_cordinate.csv'
 neighbor_kj_path = r'C:\Users\Reza\Documents\GitHub\Kashef_anomaly\Kashef_anomaly_detection\data\Data_bridge_ALBORZ.Neighbors.csv'
 
-# Results directory containing localization_results.json
+# Results directory containing localization_results.json (in src/test/)
+# Will look for: src/test/anomaly_results/
 results_directory = 'anomaly_results'
 
 def main():
@@ -20,11 +21,19 @@ def main():
     print("Visualization-Only Mode")
     print("-" * 40)
     
+    # Get the correct path to Source_Localization.py (in the same directory as this script)
+    script_dir = Path(__file__).parent
+    source_loc_path = script_dir / "Source_Localization.py"
+    
+    if not source_loc_path.exists():
+        print(f"❌ Error: Could not find Source_Localization.py at {source_loc_path}")
+        print("Please ensure the file is in src/test/ directory.")
+        return
+    
     # Load the main module
-    spec = importlib.util.spec_from_file_location("anomaly_system", "Source_Localization.py")
+    spec = importlib.util.spec_from_file_location("anomaly_system", str(source_loc_path))
     if spec is None:
-        print("Error: Could not find Source_Localization.py")
-        print("Please ensure the file is in the same directory.")
+        print("Error: Could not load Source_Localization.py")
         return
         
     anomaly_system = importlib.util.module_from_spec(spec)
