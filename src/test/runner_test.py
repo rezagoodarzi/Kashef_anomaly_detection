@@ -6,8 +6,8 @@ Simple script to run the anomaly detection system with your data
 import pandas as pd
 import numpy as np
 from pathlib import Path
-rssi_kj_path = r'C:\Users\USER\Desktop\kasheftest\Git_hub\Kashef_anomaly_detection\data\process\KJ_merged_with_coordinates_degree.csv'
-neighbor_kj_path =  r'C:\Users\USER\Desktop\kasheftest\Git_hub\Kashef_anomaly_detection\data\raw\Data_bridge_ALBORZ.Neighbors.csv'
+rssi_kj_path = r'C:\Users\Reza\Documents\GitHub\Kashef_anomaly\Kashef_anomaly_detection\data\KJ_ne_site_anomaly_no_cordinate.csv'
+neighbor_kj_path =  r'C:\Users\Reza\Documents\GitHub\Kashef_anomaly\Kashef_anomaly_detection\data\Data_bridge_ALBORZ.Neighbors.csv'
 # First, install required packages if not already installed
 def install_requirements():
     """Install required packages"""
@@ -178,10 +178,10 @@ def run_analysis():
         unique_sectors = data_df['NE'].unique()
         sampled_sectors = np.random.choice(unique_sectors, min(800, len(unique_sectors)), replace=False)
         
-        # Filter for sampled sectors and last 10 days
+        # Filter for sampled sectors and last 4 days (for testing)
         data_df['Date'] = pd.to_datetime(data_df['Date'])
         last_date = data_df['Date'].max()
-        start_date = last_date - pd.Timedelta(days=10)
+        start_date = last_date - pd.Timedelta(days=4)
         
         data_df = data_df[
             (data_df['NE'].isin(sampled_sectors)) & 
@@ -252,8 +252,48 @@ def run_analysis():
         import traceback
         traceback.print_exc()
 
+def run_visualization_only():
+    """Run visualization only from saved results"""
+    print("\n" + "="*80)
+    print("VISUALIZATION-ONLY MODE")
+    print("="*80)
+    
+    import sys
+    import importlib.util
+    
+    # Load the main module dynamically
+    spec = importlib.util.spec_from_file_location("anomaly_system", "Source_Localization.py")
+    if spec is None:
+        print("Error: Could not find Source_Localization.py")
+        return
+        
+    anomaly_system = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(anomaly_system)
+    
+    # Run visualization
+    try:
+        anomaly_system.visualize_from_saved_results(
+            data_file=rssi_kj_path,
+            neighbor_file=neighbor_kj_path,
+            results_dir='anomaly_results'
+        )
+    except Exception as e:
+        print(f"\n❌ Error during visualization: {e}")
+        import traceback
+        traceback.print_exc()
+
 def main():
     """Main execution"""
+    import sys
+    '''
+    # Check for command-line arguments
+    if len(sys.argv) > 1 and sys.argv[1] == '--visualize-only':
+        print("Telecom Anomaly Source Localization System")
+        print("-" * 40)
+        print("\nMode: Visualization Only")
+        run_visualization_only()
+        return
+    
     print("Telecom Anomaly Source Localization System")
     print("-" * 40)
     
@@ -284,6 +324,7 @@ def main():
     # Run analysis
     print("\n5. Running analysis...")
     run_analysis()
-
+    '''
+    run_visualization_only()
 if __name__ == "__main__":
     main()

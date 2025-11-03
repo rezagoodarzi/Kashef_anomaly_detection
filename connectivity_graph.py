@@ -22,7 +22,7 @@ sector_loc = esfahan_grouped.set_index('Mapped_ID')[['LATITUDE', 'LONGITUDE', 'A
 # 2. Load anomaly detection results
 with open("daily_analysis_results.pkl", "rb") as f:
     results = pickle.load(f)
-
+    
 anomaly_sectors = list(results['propagation_analysis'].keys())
 affected_nodes = set(results['affected_sectors'])
 

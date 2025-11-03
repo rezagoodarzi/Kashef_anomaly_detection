@@ -114,7 +114,7 @@ class BaselineEstimator:
     def detect_anomaly_enhanced(self, rssi_value, hour, baseline):
         """Enhanced anomaly detection"""
         if baseline is None or baseline.get(hour) is None:
-            return rssi_value > -94.5, rssi_value + 110  # Simple threshold
+            return rssi_value > -108, rssi_value + 120  # Simple threshold
             
         stats = baseline[hour]
         
@@ -122,7 +122,7 @@ class BaselineEstimator:
         criteria = []
         
         # 1. Absolute threshold
-        criteria.append(rssi_value > -94.5)
+        criteria.append(rssi_value > -108)
         
         # 2. Statistical deviation (IQR method)
         iqr = stats['q75'] - stats['q25']
@@ -214,8 +214,8 @@ class NeighborAnalyzer:
             features['diff_corr'] = 0
             
         # Peak alignment
-        peaks1, _ = find_peaks(series1, height=-94)
-        peaks2, _ = find_peaks(series2, height=-94)
+        peaks1, _ = find_peaks(series1, height=-110)
+        peaks2, _ = find_peaks(series2, height=-110)
         
         changes1 = self.find_changepoints_pelt(series1)
         changes2 = self.find_changepoints_pelt(series2)
@@ -303,14 +303,9 @@ class NeighborAnalyzer:
                     # Option 2: Use percentile of current data as baseline
                     baseline_median = np.percentile(neighbor_rssi, 25)  # Use 25th percentile
                 
-                # For capped values, estimate relative change
+                # Calculate RSSI change from baseline
                 max_rssi = np.max(neighbor_rssi)
-                if max_rssi >= -93:  # Likely capped
-                    # Use percentage of values at cap as intensity indicator
-                    capped_ratio = np.sum(neighbor_rssi >= -93) / len(neighbor_rssi)
-                    rssi_change = (max_rssi - baseline_median) * (1 + capped_ratio)
-                else:
-                    rssi_change = max_rssi - baseline_median
+                rssi_change = max_rssi - baseline_median
                 
                 correlated.append({
                     'sector': neighbor_id,
@@ -341,27 +336,43 @@ class SourceLocalizer:
         self.freq_mhz = 2100  # 4G frequency
         
     def rssi_to_distance(self, rssi_dbm, tx_power_dbm=40):
-        """Convert RSSI to estimated distance"""
-        # Free space path loss: RSSI = Tx_power - 20*log10(f_MHz) - 20*log10(d_km) + 27.55
-        # Simplified: d = 10^((Tx_power - RSSI - 20*log10(f) + 27.55) / (10*n))
-        if rssi_dbm >= -93:  # Capped value detected
-        # Assume linear distribution above cap
-            estimated_actual = rssi_dbm + np.random.uniform(0, 10)  # -92 could be -92 to -72
-            rssi_dbm = min(estimated_actual, -60)
-
-        # Using simplified model
+        """
+        Convert RSSI to estimated distance using log-distance path loss model.
+        
+        Formula: RSSI = Tx_power - PL0 - 10*n*log10(d/d0)
+        Where:
+            - PL0 is free space path loss at reference distance d0
+            - n is path loss exponent (self.n)
+            - d0 is reference distance (1 meter)
+        
+        Args:
+            rssi_dbm: Received signal strength in dBm
+            tx_power_dbm: Transmitter power in dBm (default: 40)
+            
+        Returns:
+            Estimated distance in meters
+        """
+        # Boundary checks for extreme values
         if rssi_dbm >= -60:  # Very close
             return 50  # meters
         elif rssi_dbm <= -120:  # Very far
             return 5000  # meters
         
-        # Log-distance path loss model
-        reference_rssi = -60  # RSSI at 50m
-        reference_distance = 50
+        # Log-distance path loss model with transmit power
+        d0 = 1  # reference distance (1 meter)
         
-        path_loss_db = reference_rssi - rssi_dbm
-        distance = reference_distance * (10 ** (path_loss_db / (10 * self.n)))
+        # Free space path loss at reference distance (1m) for given frequency
+        # PL0 = 20*log10(4*pi*d0*f/c) = 20*log10(f_MHz) - 28
+        PL0 = 20 * np.log10(self.freq_mhz) - 28
         
+        # Calculate path loss from RSSI
+        path_loss = tx_power_dbm - rssi_dbm
+        
+        # Calculate distance using log-distance model
+        # d = d0 * 10^((PL - PL0) / (10*n))
+        distance = d0 * (10 ** ((path_loss - PL0) / (10 * self.n)))
+        
+        # Clamp output to reasonable range
         return min(max(distance, 10), 10000)  # Limit between 10m and 10km
     
     def haversine_distance(self, lat1, lon1, lat2, lon2):
@@ -442,7 +453,7 @@ class SourceLocalizer:
                 ant_weight = 1.0
             
             # Path loss weight (inverse - higher path loss = lower weight)
-            pl_weight = 1.0 / (1 + sector.get('pathloss', 100) / 100)
+            pl_weight = 1.0 / (1 + sector.get('pathloss', 126) / 100)
             
             # Calculate weighted error
             distance_error = (actual_dist - estimated_dist) ** 2
@@ -464,10 +475,10 @@ class SourceLocalizer:
 
         # Add anomaly sectors
         for _, sector in anomaly_sectors.iterrows():
-            if baselines and sector['NE'] in baselines and sector['hour'] in baselines[sector['NE']]:
-                baseline_val = baselines[sector['NE']][sector['hour']].get('median', -110)
+            if baselines and sector['NE'] in baselines and sector['hour'] in baselines[sector['NE']] and baselines[sector['NE']][sector['hour']] is not None:
+                baseline_val = baselines[sector['NE']][sector['hour']].get('median', -115)
             else:
-                baseline_val = -110  # Default baseline value
+                baseline_val = -115  # Default baseline value
 
             all_sectors.append({
                 'latitude': sector['Latitude'],
@@ -475,7 +486,7 @@ class SourceLocalizer:
                 'azimuth': sector['Azimuth'],
                 'rssi_change': sector['RSSI_PUCCH(EUCell_Eric)(CRA)'] - baseline_val,
                 'max_rssi': sector['RSSI_PUCCH(EUCell_Eric)(CRA)'],
-                'pathloss': 100,  # Default if not in neighbor data
+                'pathloss': 126,  # Average pathloss based on actual neighbor data
                 'weight': 1.5  # Higher weight for anomaly sectors
             })
         
@@ -510,6 +521,10 @@ class SourceLocalizer:
         
         initial_lat = np.average(lats, weights=weights)
         initial_lon = np.average(lons, weights=weights)
+        
+        # Check if initial coordinates are valid
+        if pd.isna(initial_lat) or pd.isna(initial_lon) or np.isinf(initial_lat) or np.isinf(initial_lon):
+            return None
         
         # Bounds for optimization (within reasonable range)
         lat_margin = 0.05  # ~5.5km
@@ -550,6 +565,10 @@ class SourceLocalizer:
             distances.append(dist)
             
         uncertainty = np.std(distances) if len(distances) > 0 else 1000
+        
+        # Final validation - ensure coordinates are valid
+        if pd.isna(final_location[0]) or pd.isna(final_location[1]) or np.isinf(final_location[0]) or np.isinf(final_location[1]):
+            return None
         
         return {
             'latitude': final_location[0],
@@ -765,7 +784,7 @@ class AnomalyLocalizationPipeline:
                     'pattern_confidence': pattern_confidence,
                     'temporal_features': temporal_features,
                     'anomaly_sectors': group['sectors'][['NE', 'Latitude', 'Longitude', 'RSSI_PUCCH(EUCell_Eric)(CRA)']].to_dict('records'),
-                    'correlated_neighbors': unique_neighbors[:10]  # Top 10
+                    'correlated_neighbors': unique_neighbors[:20]  # Top 10
                 }
                 
                 self.results.append(result)
@@ -857,12 +876,19 @@ class AnomalyLocalizationPipeline:
                     'duration_hours': r['duration_hours'],
                     'num_anomaly_sectors': r['num_anomaly_sectors'],
                     'num_correlated_neighbors': r['num_correlated_neighbors'],
-                    'source_lat': r['source_location']['latitude'],
-                    'source_lon': r['source_location']['longitude'],
-                    'uncertainty_meters': r['source_location']['uncertainty_meters'],
                     'temporal_pattern': r['temporal_pattern'],
                     'pattern_confidence': r['pattern_confidence']
                 }
+                # Add source location if available
+                if r['source_location']:
+                    flat_result['source_lat'] = r['source_location']['latitude']
+                    flat_result['source_lon'] = r['source_location']['longitude']
+                    flat_result['uncertainty_meters'] = r['source_location']['uncertainty_meters']
+                else:
+                    flat_result['source_lat'] = None
+                    flat_result['source_lon'] = None
+                    flat_result['uncertainty_meters'] = None
+                    
                 flat_results.append(flat_result)
             
             csv_df = pd.DataFrame(flat_results)
@@ -902,6 +928,9 @@ class Visualizer:
         # 5. Network topology visualization
         self.create_network_topology(data_df, neighbor_df, results)
         
+        # 6. Behavioral connectivity graph
+        self.create_behavioral_connectivity(data_df, results)
+        
         print("   All visualizations created!")
         
 
@@ -937,97 +966,127 @@ class Visualizer:
             control=True
         ).add_to(m)
 
-
-        folium.LayerControl().add_to(m)
-        
-        # 1. Add sectors layer
-        # ... rest of your code
-
         # 1. Add sectors layer
         sector_group = folium.FeatureGroup(name='Sectors')
         
+        sector_count = 0
         for _, sector in data_df.drop_duplicates('NE').iterrows():
+            # Skip sectors with invalid coordinates
+            if pd.isna(sector['Latitude']) or pd.isna(sector['Longitude']):
+                continue
+                
             color = 'red' if sector['Anomaly'] else 'green'
             
             # Create sector marker
+            # Safely format popup values
+            ne_str = str(sector['NE']) if not pd.isna(sector.get('NE')) else 'Unknown'
+            site_str = str(sector['Site']) if not pd.isna(sector.get('Site')) else 'Unknown'
+            azimuth_str = f"{sector['Azimuth']:.1f}°" if not pd.isna(sector.get('Azimuth')) else 'N/A'
+            height_str = f"{sector['AntennaHeight']:.1f}m" if not pd.isna(sector.get('AntennaHeight')) else 'N/A'
+            
             folium.CircleMarker(
-                location=[sector['Latitude'], sector['Longitude']],
+                location=[float(sector['Latitude']), float(sector['Longitude'])],
                 radius=5,
                 popup=folium.Popup(
-                    f"<b>Sector:</b> {sector['NE']}<br>"
-                    f"<b>Site:</b> {sector['Site']}<br>"
-                    f"<b>Azimuth:</b> {sector['Azimuth']}°<br>"
-                    f"<b>Height:</b> {sector['AntennaHeight']}m",
+                    f"<b>Sector:</b> {ne_str}<br>"
+                    f"<b>Site:</b> {site_str}<br>"
+                    f"<b>Azimuth:</b> {azimuth_str}<br>"
+                    f"<b>Height:</b> {height_str}",
                     max_width=200
                 ),
-                tooltip=f"Sector: {sector['NE']}",
-                color=color,
-                fillColor=color,
+                tooltip=f"Sector: {ne_str}",
+                color=str(color),
+                fillColor=str(color),
                 fillOpacity=0.6,
                 weight=2
             ).add_to(sector_group)
+            sector_count += 1
             
             # Add azimuth line
             if not pd.isna(sector['Azimuth']):
                 end_point = self._calculate_endpoint(
-                    sector['Latitude'], 
-                    sector['Longitude'],
-                    sector['Azimuth'], 
+                    float(sector['Latitude']), 
+                    float(sector['Longitude']),
+                    float(sector['Azimuth']), 
                     500  # 500m line
                 )
                 
                 folium.PolyLine(
                     locations=[
-                        [sector['Latitude'], sector['Longitude']],
-                        end_point
+                        [float(sector['Latitude']), float(sector['Longitude'])],
+                        [float(end_point[0]), float(end_point[1])]
                     ],
-                    color=color,
+                    color=str(color),
                     weight=1,
                     opacity=0.5
                 ).add_to(sector_group)
         
         sector_group.add_to(m)
+        print(f"   Added {sector_count} sectors to map")
         
         # 2. Add anomaly sources layer
         source_group = folium.FeatureGroup(name='Detected Sources')
         
+        source_count = 0
         for result in results:
             if result['source_location']:
                 loc = result['source_location']
                 
+                # Skip if coordinates contain NaN values
+                if pd.isna(loc['latitude']) or pd.isna(loc['longitude']):
+                    print(f"Warning: Skipping source {result['group_id']} - invalid coordinates")
+                    continue
+                
                 # Source marker
+                # Safely format all values
+                group_id_str = str(result.get('group_id', 'Unknown'))
+                pattern_str = str(result.get('temporal_pattern', 'Unknown'))
+                confidence_val = float(result.get('pattern_confidence', 0))
+                uncertainty_val = float(loc.get('uncertainty_meters', 0))
+                duration_val = float(result.get('duration_hours', 0))
+                num_sectors = int(result.get('num_anomaly_sectors', 0))
+                
                 folium.Marker(
-                    location=[loc['latitude'], loc['longitude']],
+                    location=[float(loc['latitude']), float(loc['longitude'])],
                     popup=folium.Popup(
-                        f"<b>Source ID:</b> {result['group_id']}<br>"
-                        f"<b>Pattern:</b> {result['temporal_pattern']}<br>"
-                        f"<b>Confidence:</b> {result['pattern_confidence']:.2%}<br>"
-                        f"<b>Uncertainty:</b> {loc['uncertainty_meters']:.0f}m<br>"
-                        f"<b>Duration:</b> {result['duration_hours']:.1f}h<br>"
-                        f"<b>Affected Sectors:</b> {result['num_anomaly_sectors']}",
+                        f"<b>Source ID:</b> {group_id_str}<br>"
+                        f"<b>Pattern:</b> {pattern_str}<br>"
+                        f"<b>Confidence:</b> {confidence_val:.2%}<br>"
+                        f"<b>Uncertainty:</b> {uncertainty_val:.0f}m<br>"
+                        f"<b>Duration:</b> {duration_val:.1f}h<br>"
+                        f"<b>Affected Sectors:</b> {num_sectors}",
                         max_width=250
                     ),
-                    tooltip=f"Source {result['group_id']}: {result['temporal_pattern']}",
+                    tooltip=f"Source {group_id_str}: {pattern_str}",
                     icon=folium.Icon(color='orange', icon='warning', prefix='fa')
                 ).add_to(source_group)
                 
                 # Uncertainty circle
                 folium.Circle(
-                    location=[loc['latitude'], loc['longitude']],
-                    radius=loc['uncertainty_meters'],
+                    location=[float(loc['latitude']), float(loc['longitude'])],
+                    radius=float(uncertainty_val),
                     color='orange',
                     fill=True,
                     fillOpacity=0.2,
                     weight=2,
-                    popup=f"Uncertainty: {loc['uncertainty_meters']:.0f}m"
+                    popup=f"Uncertainty: {uncertainty_val:.0f}m"
                 ).add_to(source_group)
+                source_count += 1
                 
                 # Draw lines to affected sectors
                 for sector in result['anomaly_sectors']:
+                    # Skip if sector coordinates are invalid
+                    if pd.isna(sector.get('Latitude')) or pd.isna(sector.get('Longitude')):
+                        continue
+                    
+                    # Ensure coordinates are floats
+                    sector_lat = float(sector['Latitude'])
+                    sector_lon = float(sector['Longitude'])
+                        
                     folium.PolyLine(
                         locations=[
-                            [loc['latitude'], loc['longitude']],
-                            [sector['Latitude'], sector['Longitude']]
+                            [float(loc['latitude']), float(loc['longitude'])],
+                            [sector_lat, sector_lon]
                         ],
                         color='red',
                         weight=1,
@@ -1036,25 +1095,30 @@ class Visualizer:
                     ).add_to(source_group)
         
         source_group.add_to(m)
+        print(f"   Added {source_count} sources to map")
         
         # 3. Add heatmap of anomalies
         anomaly_data = data_df[data_df['Anomaly'] == True]
         if len(anomaly_data) > 0:
-            heat_data = anomaly_data[['Latitude', 'Longitude', 'RSSI_PUCCH(EUCell_Eric)(CRA)']].values.tolist()
+            # Filter out rows with NaN coordinates
+            anomaly_data_valid = anomaly_data.dropna(subset=['Latitude', 'Longitude'])
             
-            # Normalize RSSI for heatmap intensity
-            for point in heat_data:
-                point[2] = (point[2] + 120) / 60  # Normalize to 0-1
-            
-            HeatMap(
-                heat_data,
-                name='Anomaly Heatmap',
-                min_opacity=0.3,
-                max_zoom=18,
-                radius=25,
-                blur=15,
-                gradient={0.4: 'blue', 0.65: 'yellow', 0.85: 'orange', 1: 'red'}
-            ).add_to(m)
+            if len(anomaly_data_valid) > 0:
+                heat_data = anomaly_data_valid[['Latitude', 'Longitude', 'RSSI_PUCCH(EUCell_Eric)(CRA)']].values.tolist()
+                
+                # Normalize RSSI for heatmap intensity
+                for point in heat_data:
+                    point[2] = (point[2] + 120) / 60  # Normalize to 0-1
+                
+                HeatMap(
+                    heat_data,
+                    name='Anomaly Heatmap',
+                    min_opacity=0.3,
+                    max_zoom=18,
+                    radius=25,
+                    blur=15,
+                    gradient={'0.4': 'blue', '0.65': 'yellow', '0.85': 'orange', '1': 'red'}
+                ).add_to(m)
         
         # Add minimap
         minimap = plugins.MiniMap(tile_layer='CartoDB dark_matter')
@@ -1062,6 +1126,9 @@ class Visualizer:
         
         # Add measurement tool
         plugins.MeasureControl(position='topright').add_to(m)
+        
+        # Add layer control at the end (after all layers are added)
+        folium.LayerControl(collapsed=False).add_to(m)
         
         # Save map
         map_path = self.output_dir / 'anomaly_map.html'
@@ -1281,18 +1348,31 @@ class Visualizer:
         
         # 2. Uncertainty vs Number of Sectors
         ax2 = axes[0, 1]
-        if uncertainties and num_sectors:
+        if uncertainties and num_sectors and len(uncertainties) >= 2:
             ax2.scatter(num_sectors, uncertainties, alpha=0.6, s=50)
             ax2.set_xlabel('Number of Affected Sectors')
             ax2.set_ylabel('Uncertainty (meters)')
             ax2.set_title('Uncertainty vs Sector Count')
             
-            # Add trend line
-            z = np.polyfit(num_sectors, uncertainties, 1)
-            p = np.poly1d(z)
-            ax2.plot(sorted(num_sectors), p(sorted(num_sectors)), 
-                    "r--", alpha=0.5, label=f'Trend')
-            ax2.legend()
+            # Add trend line (with error handling)
+            try:
+                # Filter out any NaN or inf values
+                valid_indices = [i for i in range(len(num_sectors)) 
+                                if not (pd.isna(num_sectors[i]) or pd.isna(uncertainties[i]) or 
+                                       np.isinf(num_sectors[i]) or np.isinf(uncertainties[i]))]
+                
+                if len(valid_indices) >= 2 and len(set([num_sectors[i] for i in valid_indices])) > 1:
+                    valid_sectors = [num_sectors[i] for i in valid_indices]
+                    valid_uncert = [uncertainties[i] for i in valid_indices]
+                    
+                    z = np.polyfit(valid_sectors, valid_uncert, 1)
+                    p = np.poly1d(z)
+                    x_range = np.linspace(min(valid_sectors), max(valid_sectors), 100)
+                    ax2.plot(x_range, p(x_range), "r--", alpha=0.5, label='Trend')
+                    ax2.legend()
+            except (np.linalg.LinAlgError, ValueError) as e:
+                # If trend line fails, just skip it
+                print(f"  Note: Could not compute trend line for uncertainty plot")
         
         # 3. Pattern distribution
         ax3 = axes[1, 0]
@@ -1323,90 +1403,475 @@ class Visualizer:
         print(f"   Localization analysis saved to {localization_plot_path}")
     
     def create_network_topology(self, data_df, neighbor_df, results):
-        """Create network topology visualization"""
+        """Create optimized network topology visualization"""
         # Create interactive network graph
         fig = go.Figure()
         
-        # Get unique sectors
-        sectors = data_df.drop_duplicates('NE')
+        # Get unique sectors and filter out NaN coordinates
+        sectors = data_df.drop_duplicates('NE').dropna(subset=['Latitude', 'Longitude'])
         
-        # Add sector nodes
-        for _, sector in sectors.iterrows():
-            color = 'red' if sector['Anomaly'] else 'lightgreen'
+        # Separate normal and anomaly sectors
+        normal_sectors = sectors[sectors['Anomaly'] == False]
+        anomaly_sectors = sectors[sectors['Anomaly'] == True]
+        
+        # Add normal sectors as SINGLE trace (much faster!)
+        if len(normal_sectors) > 0:
+            hover_text = [
+                f"<b>{row['NE']}</b><br>Site: {row['Site']}<br>Azimuth: {row['Azimuth']}°"
+                for _, row in normal_sectors.iterrows()
+            ]
             
             fig.add_trace(go.Scattermapbox(
-                mode='markers+text',
-                lon=[sector['Longitude']],
-                lat=[sector['Latitude']],
-                marker={'size': 10, 'color': color},
-                text=sector['NE'],
-                textposition='top center',
-                name=sector['NE'],
-                showlegend=False,
-                hovertemplate=f"<b>{sector['NE']}</b><br>" +
-                             f"Site: {sector['Site']}<br>" +
-                             f"Azimuth: {sector['Azimuth']}°<br>" +
-                             f"<extra></extra>"
+                mode='markers',
+                lon=normal_sectors['Longitude'].tolist(),
+                lat=normal_sectors['Latitude'].tolist(),
+                marker={'size': 6, 'color': 'lightgreen'},
+                name='Normal Sectors',
+                text=hover_text,
+                hovertemplate='%{text}<extra></extra>',
+                showlegend=True
             ))
         
-        # Add neighbor connections (sample for performance)
-        sample_neighbors = neighbor_df[neighbor_df['rank'] <= 3].sample(
-            min(500, len(neighbor_df[neighbor_df['rank'] <= 3]))
-        )
-        
-        for _, neighbor in sample_neighbors.iterrows():
-            # Get coordinates
-            sector_data = sectors[sectors['NE'] == neighbor['Sector']]
-            neighbor_data = sectors[sectors['NE'] == neighbor['Neighbor']]
+        # Add anomaly sectors as SINGLE trace
+        if len(anomaly_sectors) > 0:
+            hover_text = [
+                f"<b>{row['NE']}</b><br>Site: {row['Site']}<br>Azimuth: {row['Azimuth']}°"
+                for _, row in anomaly_sectors.iterrows()
+            ]
             
-            if len(sector_data) > 0 and len(neighbor_data) > 0:
+            fig.add_trace(go.Scattermapbox(
+                mode='markers',
+                lon=anomaly_sectors['Longitude'].tolist(),
+                lat=anomaly_sectors['Latitude'].tolist(),
+                marker={'size': 8, 'color': 'red'},
+                name='Anomaly Sectors',
+                text=hover_text,
+                hovertemplate='%{text}<extra></extra>',
+                showlegend=True
+            ))
+        
+        # Add neighbor connections - MUCH more aggressive sampling
+        # Only show connections for anomaly sectors to reduce clutter
+        if len(anomaly_sectors) > 0:
+            anomaly_sector_ids = set(anomaly_sectors['NE'].unique())
+            
+            # Filter connections: only those involving anomaly sectors
+            relevant_neighbors = neighbor_df[
+                (neighbor_df['Sector'].isin(anomaly_sector_ids) | 
+                 neighbor_df['Neighbor'].isin(anomaly_sector_ids)) &
+                (neighbor_df['rank'] == 1)  # Only first neighbor
+            ]
+            
+            # Sample max 100 connections
+            sample_neighbors = relevant_neighbors.sample(
+                min(100, len(relevant_neighbors))
+            ) if len(relevant_neighbors) > 0 else pd.DataFrame()
+            
+            # Collect all line coordinates in lists
+            line_lons = []
+            line_lats = []
+            
+            for _, neighbor in sample_neighbors.iterrows():
+                sector_data = sectors[sectors['NE'] == neighbor['Sector']]
+                neighbor_data = sectors[sectors['NE'] == neighbor['Neighbor']]
+                
+                if len(sector_data) > 0 and len(neighbor_data) > 0:
+                    # Add line coordinates (with None to separate lines)
+                    line_lons.extend([
+                        sector_data.iloc[0]['Longitude'],
+                        neighbor_data.iloc[0]['Longitude'],
+                        None
+                    ])
+                    line_lats.extend([
+                        sector_data.iloc[0]['Latitude'],
+                        neighbor_data.iloc[0]['Latitude'],
+                        None
+                    ])
+            
+            # Add ALL connections as SINGLE trace
+            if line_lons:
                 fig.add_trace(go.Scattermapbox(
                     mode='lines',
-                    lon=[sector_data.iloc[0]['Longitude'], neighbor_data.iloc[0]['Longitude']],
-                    lat=[sector_data.iloc[0]['Latitude'], neighbor_data.iloc[0]['Latitude']],
-                    line={'width': 1, 'color': 'blue'},
-                    opacity=0.3,
-                    showlegend=False,
+                    lon=line_lons,
+                    lat=line_lats,
+                    line={'width': 1, 'color': 'rgba(100, 100, 255, 0.3)'},
+                    name='Neighbor Links',
+                    showlegend=True,
                     hoverinfo='skip'
                 ))
         
         # Add detected sources
-        for result in results:
-            if result['source_location']:
-                loc = result['source_location']
+        if results:
+            source_lons = []
+            source_lats = []
+            source_text = []
+            
+            for result in results:
+                if result.get('source_location'):
+                    loc = result['source_location']
+                    if not (pd.isna(loc.get('latitude')) or pd.isna(loc.get('longitude'))):
+                        source_lons.append(loc['longitude'])
+                        source_lats.append(loc['latitude'])
+                        source_text.append(
+                            f"<b>Source {result['group_id']}</b><br>" +
+                            f"Pattern: {result['temporal_pattern']}<br>" +
+                            f"Uncertainty: {loc['uncertainty_meters']:.0f}m"
+                        )
+            
+            if source_lons:
                 fig.add_trace(go.Scattermapbox(
                     mode='markers',
-                    lon=[loc['longitude']],
-                    lat=[loc['latitude']],
+                    lon=source_lons,
+                    lat=source_lats,
                     marker={'size': 15, 'color': 'orange', 'symbol': 'star'},
-                    text=f"Source {result['group_id']}",
-                    name=f"Source {result['group_id']}",
-                    showlegend=True,
-                    hovertemplate=f"<b>Source {result['group_id']}</b><br>" +
-                                 f"Pattern: {result['temporal_pattern']}<br>" +
-                                 f"Uncertainty: {loc['uncertainty_meters']:.0f}m<br>" +
-                                 f"<extra></extra>"
+                    name='Detected Sources',
+                    text=source_text,
+                    hovertemplate='%{text}<extra></extra>',
+                    showlegend=True
                 ))
         
         # Update layout
+        center_lat = sectors['Latitude'].mean()
+        center_lon = sectors['Longitude'].mean()
+        
         fig.update_layout(
             mapbox=dict(
                 style="open-street-map",
-                center=dict(
-                    lat=sectors['Latitude'].mean(),
-                    lon=sectors['Longitude'].mean()
-                ),
+                center=dict(lat=center_lat, lon=center_lon),
                 zoom=11
             ),
             height=800,
-            title="Network Topology and Detected Sources",
-            showlegend=True
+            title="Optimized Network Topology (Anomaly-Focused)",
+            showlegend=True,
+            hovermode='closest'
         )
         
-        # Save
+        # Save with compression
         topology_path = self.output_dir / 'network_topology.html'
-        fig.write_html(str(topology_path))
+        fig.write_html(str(topology_path), include_plotlyjs='cdn')  # Use CDN to reduce file size
         print(f"   Network topology saved to {topology_path}")
+        print(f"   (Showing {len(normal_sectors)} normal + {len(anomaly_sectors)} anomaly sectors)")
+    
+    def create_behavioral_connectivity(self, data_df, results):
+        """Create behavioral connectivity graph based on RSSI pattern similarity"""
+        print("   Creating behavioral connectivity graph...")
+        
+        # Get sectors with sufficient data
+        sector_counts = data_df.groupby('NE').size()
+        valid_sectors = sector_counts[sector_counts >= 10].index.tolist()
+        
+        # Limit to manageable number for performance
+        if len(valid_sectors) > 100:
+            # Prioritize anomaly sectors
+            anomaly_sectors = data_df[data_df['Anomaly'] == True]['NE'].unique()
+            normal_sectors = data_df[data_df['Anomaly'] == False]['NE'].unique()
+            
+            # Take all anomaly sectors + sample of normal sectors
+            selected_sectors = list(anomaly_sectors[:50])
+            remaining_slots = 100 - len(selected_sectors)
+            if remaining_slots > 0:
+                selected_sectors.extend(list(np.random.choice(
+                    normal_sectors, 
+                    min(remaining_slots, len(normal_sectors)), 
+                    replace=False
+                )))
+            valid_sectors = selected_sectors[:100]
+        
+        if len(valid_sectors) < 2:
+            print("   Skipping: Not enough sectors with sufficient data")
+            return
+        
+        # Create RSSI pivot table
+        pivot_data = data_df[data_df['NE'].isin(valid_sectors)].pivot_table(
+            index='Date',
+            columns='NE',
+            values='RSSI_PUCCH(EUCell_Eric)(CRA)',
+            aggfunc='mean'
+        )
+        
+        # Fill missing values
+        pivot_data = pivot_data.ffill().bfill().fillna(-110)
+        
+        # Calculate correlation matrix
+        corr_matrix = pivot_data.corr()
+        
+        # Create network graph data
+        edges = []
+        for i, sector1 in enumerate(valid_sectors):
+            for j, sector2 in enumerate(valid_sectors):
+                if i < j and sector1 in corr_matrix.index and sector2 in corr_matrix.columns:
+                    corr = corr_matrix.loc[sector1, sector2]
+                    # Only show strong correlations
+                    if abs(corr) > 0.7:
+                        edges.append({
+                            'source': sector1,
+                            'target': sector2,
+                            'correlation': corr
+                        })
+        
+        print(f"   Found {len(edges)} strong correlations (>0.7) among {len(valid_sectors)} sectors")
+        
+        # Create network using networkx layout
+        import networkx as nx
+        
+        G = nx.Graph()
+        for sector in valid_sectors:
+            G.add_node(sector)
+        
+        for edge in edges:
+            G.add_edge(edge['source'], edge['target'], weight=edge['correlation'])
+        
+        # Calculate layout
+        if len(G.nodes) > 0:
+            pos = nx.spring_layout(G, k=2, iterations=50)
+        else:
+            print("   Skipping: No nodes in graph")
+            return
+        
+        # Create Plotly figure
+        fig = go.Figure()
+        
+        # Add edges
+        edge_x = []
+        edge_y = []
+        edge_colors = []
+        
+        for edge in edges:
+            x0, y0 = pos[edge['source']]
+            x1, y1 = pos[edge['target']]
+            edge_x.extend([x0, x1, None])
+            edge_y.extend([y0, y1, None])
+            edge_colors.extend([edge['correlation'], edge['correlation'], None])
+        
+        if edge_x:
+            fig.add_trace(go.Scatter(
+                x=edge_x, y=edge_y,
+                mode='lines',
+                line=dict(width=1, color='rgba(125, 125, 125, 0.5)'),
+                hoverinfo='none',
+                showlegend=False,
+                name='Correlations'
+            ))
+        
+        # Add nodes
+        node_x = []
+        node_y = []
+        node_colors = []
+        node_text = []
+        node_sizes = []
+        
+        for node in G.nodes():
+            x, y = pos[node]
+            node_x.append(x)
+            node_y.append(y)
+            
+            # Check if sector has anomalies
+            has_anomaly = data_df[data_df['NE'] == node]['Anomaly'].any()
+            node_colors.append('red' if has_anomaly else 'lightgreen')
+            
+            # Count connections
+            connections = G.degree(node)
+            node_sizes.append(10 + connections * 3)
+            
+            # Hover text
+            avg_rssi = data_df[data_df['NE'] == node]['RSSI_PUCCH(EUCell_Eric)(CRA)'].mean()
+            node_text.append(
+                f"<b>{node}</b><br>" +
+                f"Connections: {connections}<br>" +
+                f"Avg RSSI: {avg_rssi:.1f} dBm<br>" +
+                f"Status: {'Anomaly' if has_anomaly else 'Normal'}"
+            )
+        
+        fig.add_trace(go.Scatter(
+            x=node_x, y=node_y,
+            mode='markers+text',
+            marker=dict(
+                size=node_sizes,
+                color=node_colors,
+                line=dict(width=2, color='white')
+            ),
+            text=[node[:8] for node in G.nodes()],  # Shortened labels
+            textposition='top center',
+            textfont=dict(size=8),
+            hovertext=node_text,
+            hoverinfo='text',
+            showlegend=False,
+            name='Sectors'
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title="Behavioral Connectivity Graph<br><sub>Sectors connected by similar RSSI patterns (correlation > 0.7)</sub>",
+            showlegend=False,
+            hovermode='closest',
+            margin=dict(b=20, l=5, r=5, t=80),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            plot_bgcolor='white',
+            height=800,
+            width=1000
+        )
+        
+        # Add annotations
+        fig.add_annotation(
+            text=f"Showing {len(valid_sectors)} sectors with {len(edges)} strong correlations<br>" +
+                 f"<span style='color:red'>●</span> Anomaly sectors  " +
+                 f"<span style='color:lightgreen'>●</span> Normal sectors<br>" +
+                 f"Node size = Number of behavioral connections",
+            xref="paper", yref="paper",
+            x=0.5, y=-0.05,
+            showarrow=False,
+            font=dict(size=10),
+            align="center"
+        )
+        
+        # Save correlation matrix to CSV
+        corr_matrix_path = self.output_dir / 'behavioral_correlation_matrix.csv'
+        corr_matrix.to_csv(corr_matrix_path)
+        print(f"   Correlation matrix saved to {corr_matrix_path}")
+        
+        # Save edge list (connections) to CSV
+        if edges:
+            edges_df = pd.DataFrame(edges)
+            edges_df = edges_df.sort_values('correlation', ascending=False)
+            
+            # Add additional info
+            edges_with_info = []
+            for _, edge in edges_df.iterrows():
+                sector1 = edge['source']
+                sector2 = edge['target']
+                
+                # Get sector info
+                sector1_anomaly = data_df[data_df['NE'] == sector1]['Anomaly'].any()
+                sector2_anomaly = data_df[data_df['NE'] == sector2]['Anomaly'].any()
+                
+                sector1_avg_rssi = data_df[data_df['NE'] == sector1]['RSSI_PUCCH(EUCell_Eric)(CRA)'].mean()
+                sector2_avg_rssi = data_df[data_df['NE'] == sector2]['RSSI_PUCCH(EUCell_Eric)(CRA)'].mean()
+                
+                edges_with_info.append({
+                    'sector_1': sector1,
+                    'sector_2': sector2,
+                    'correlation': edge['correlation'],
+                    'sector_1_has_anomaly': sector1_anomaly,
+                    'sector_2_has_anomaly': sector2_anomaly,
+                    'sector_1_avg_rssi': sector1_avg_rssi,
+                    'sector_2_avg_rssi': sector2_avg_rssi,
+                    'both_anomaly': sector1_anomaly and sector2_anomaly
+                })
+            
+            edges_csv = pd.DataFrame(edges_with_info)
+            edges_path = self.output_dir / 'behavioral_connections.csv'
+            edges_csv.to_csv(edges_path, index=False)
+            print(f"   Behavioral connections saved to {edges_path}")
+            print(f"   (Found {len(edges_csv)} strong correlations)")
+        
+        # ==== NEW: Create TIME-BASED behavioral connectivity CSV ====
+        print("   Creating time-based behavioral connectivity CSV...")
+        
+        # Calculate rolling correlations over time windows
+        time_based_connectivity = []
+        
+        # Use rolling window approach (24-hour windows)
+        window_hours = 24
+        pivot_data_reset = pivot_data.reset_index()
+        
+        # Sample time points to analyze (every 6 hours to keep it manageable)
+        sample_timestamps = pivot_data_reset['Date'].iloc[::6]  # Every 6th record
+        
+        print(f"   Analyzing {min(100, len(sample_timestamps))} time periods...")
+        
+        for timestamp in sample_timestamps[:min(100, len(sample_timestamps))]:  # Limit to 100 time points
+            # Get window around this timestamp
+            window_start = timestamp - pd.Timedelta(hours=window_hours/2)
+            window_end = timestamp + pd.Timedelta(hours=window_hours/2)
+            
+            # Filter data in window
+            window_data = pivot_data_reset[
+                (pivot_data_reset['Date'] >= window_start) & 
+                (pivot_data_reset['Date'] <= window_end)
+            ].set_index('Date').drop('Date', axis=1, errors='ignore')
+            
+            if len(window_data) < 5:  # Need at least 5 data points
+                continue
+            
+            # Calculate correlation for this window
+            try:
+                window_corr = window_data.corr()
+                
+                # Find strong connections in this window (limit sectors for performance)
+                sectors_to_check = valid_sectors[:min(50, len(valid_sectors))]
+                
+                for i, sector1 in enumerate(sectors_to_check):
+                    for j, sector2 in enumerate(sectors_to_check):
+                        if i < j and sector1 in window_corr.index and sector2 in window_corr.columns:
+                            corr_value = window_corr.loc[sector1, sector2]
+                            
+                            # Only record strong correlations
+                            if abs(corr_value) > 0.7:
+                                # Get RSSI values at this timestamp for both sectors
+                                sector1_rssi = window_data[sector1].iloc[-1] if sector1 in window_data.columns else np.nan
+                                sector2_rssi = window_data[sector2].iloc[-1] if sector2 in window_data.columns else np.nan
+                                
+                                # Check anomaly status at this time
+                                sector1_anomaly = data_df[
+                                    (data_df['NE'] == sector1) & 
+                                    (data_df['Date'] >= window_start) & 
+                                    (data_df['Date'] <= window_end)
+                                ]['Anomaly'].any()
+                                
+                                sector2_anomaly = data_df[
+                                    (data_df['NE'] == sector2) & 
+                                    (data_df['Date'] >= window_start) & 
+                                    (data_df['Date'] <= window_end)
+                                ]['Anomaly'].any()
+                                
+                                time_based_connectivity.append({
+                                    'timestamp': timestamp,
+                                    'window_start': window_start,
+                                    'window_end': window_end,
+                                    'sector_1': sector1,
+                                    'sector_2': sector2,
+                                    'correlation': corr_value,
+                                    'sector_1_rssi': sector1_rssi,
+                                    'sector_2_rssi': sector2_rssi,
+                                    'sector_1_has_anomaly': sector1_anomaly,
+                                    'sector_2_has_anomaly': sector2_anomaly,
+                                    'both_have_anomaly': sector1_anomaly and sector2_anomaly,
+                                    'connection_strength': abs(corr_value)
+                                })
+            except Exception as e:
+                # Skip this window if correlation calculation fails
+                continue
+        
+        # Save time-based connectivity to CSV
+        if time_based_connectivity:
+            time_based_df = pd.DataFrame(time_based_connectivity)
+            time_based_df = time_based_df.sort_values(['timestamp', 'correlation'], ascending=[True, False])
+            
+            time_based_path = self.output_dir / 'behavioral_connectivity_timeseries.csv'
+            time_based_df.to_csv(time_based_path, index=False)
+            print(f"   ✓ Time-based behavioral connectivity saved to {time_based_path}")
+            print(f"   ✓ Found {len(time_based_df)} time-based connections across {len(time_based_df['timestamp'].unique())} time periods")
+            
+            # Also create a summary by time period
+            time_summary = time_based_df.groupby('timestamp').agg({
+                'correlation': ['count', 'mean', 'max'],
+                'both_have_anomaly': 'sum',
+                'connection_strength': 'mean'
+            }).reset_index()
+            time_summary.columns = ['timestamp', 'num_connections', 'avg_correlation', 'max_correlation', 
+                                   'anomaly_pair_count', 'avg_connection_strength']
+            
+            time_summary_path = self.output_dir / 'behavioral_connectivity_time_summary.csv'
+            time_summary.to_csv(time_summary_path, index=False)
+            print(f"   ✓ Time summary saved to {time_summary_path}")
+        else:
+            print("   ⚠ No time-based connections found (may need more data)")
+        
+        # Save HTML visualization
+        behavioral_path = self.output_dir / 'behavioral_connectivity.html'
+        fig.write_html(str(behavioral_path), include_plotlyjs='cdn')
+        print(f"   Behavioral connectivity graph saved to {behavioral_path}")
 
 def main():
     """Main execution function"""
@@ -1455,6 +1920,15 @@ def main():
         print("  - temporal_analysis.png (Temporal patterns)")
         print("  - localization_analysis.png (Localization accuracy)")
         print("  - network_topology.html (Network visualization)")
+        print("  - behavioral_connectivity.html (Behavioral similarity graph)")
+        
+        print("\nData export files:")
+        print("  - localization_results.json (Full results)")
+        print("  - localization_summary.csv (Source locations summary)")
+        print("  - behavioral_correlation_matrix.csv (Sector-to-sector correlations)")
+        print("  - behavioral_connections.csv (Strong behavioral links)")
+        print("  - behavioral_connectivity_timeseries.csv (Time-based sector connections)")
+        print("  - behavioral_connectivity_time_summary.csv (Time-based summary)")
         
     except FileNotFoundError as e:
         print(f"\nError: Could not find data files. Please ensure these files exist:")
@@ -1462,6 +1936,77 @@ def main():
         print(f"  - {neighbor_file}")
     except Exception as e:
         print(f"\nError during processing: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+def visualize_from_saved_results(data_file, neighbor_file, results_dir='anomaly_results'):
+    """
+    Load saved results and regenerate visualizations only.
+    
+    Args:
+        data_file: Path to the main data CSV file
+        neighbor_file: Path to the neighbor relationships CSV file
+        results_dir: Directory containing saved results (default: 'anomaly_results')
+    """
+    print("="*80)
+    print("LOADING SAVED RESULTS AND CREATING VISUALIZATIONS")
+    print("="*80)
+    
+    try:
+        # Load the saved results
+        results_path = Path(results_dir) / 'localization_results.json'
+        if not results_path.exists():
+            print(f"\nError: Results file not found: {results_path}")
+            print("Please run the full analysis first to generate results.")
+            return
+        
+        print(f"\n1. Loading saved results from {results_path}...")
+        with open(results_path, 'r') as f:
+            results = json.load(f)
+        print(f"   ✓ Loaded {len(results)} result(s)")
+        
+        # Load data files
+        print("\n2. Loading data files...")
+        loader = DataLoader(data_file, neighbor_file)
+        data_df, neighbor_df = loader.load_data()
+        data_df = loader.preprocess_data(data_df)
+        print(f"   ✓ Loaded {len(data_df)} records")
+        print(f"   ✓ Loaded {len(neighbor_df)} neighbor relationships")
+        
+        # Create visualizations
+        print("\n3. Creating visualizations...")
+        visualizer = Visualizer(output_dir=results_dir)
+        visualizer.create_all_visualizations(data_df, results, neighbor_df)
+        
+        print("\n" + "="*80)
+        print("VISUALIZATION COMPLETE!")
+        print("="*80)
+        
+        # Open the map automatically
+        import webbrowser
+        map_path = Path(results_dir) / 'anomaly_map.html'
+        if map_path.exists():
+            print(f"\n🌐 Opening interactive map in browser...")
+            webbrowser.open(f'file://{map_path.absolute()}')
+        
+        print("\n📁 Visualization Files:")
+        print(f"  - {results_dir}/anomaly_map.html")
+        print(f"  - {results_dir}/rssi_analysis.html")
+        print(f"  - {results_dir}/temporal_analysis.png")
+        print(f"  - {results_dir}/localization_analysis.png")
+        print(f"  - {results_dir}/network_topology.html")
+        print(f"  - {results_dir}/behavioral_connectivity.html")
+        
+        print("\n📊 Data Export Files:")
+        print(f"  - {results_dir}/behavioral_correlation_matrix.csv")
+        print(f"  - {results_dir}/behavioral_connections.csv")
+        print(f"  - {results_dir}/behavioral_connectivity_timeseries.csv (NEW: Time-based)")
+        print(f"  - {results_dir}/behavioral_connectivity_time_summary.csv (NEW: Time summary)")
+        
+    except FileNotFoundError as e:
+        print(f"\nError: File not found - {e}")
+    except Exception as e:
+        print(f"\nError during visualization: {str(e)}")
         import traceback
         traceback.print_exc()
 
