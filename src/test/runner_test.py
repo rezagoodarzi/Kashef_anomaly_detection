@@ -147,15 +147,19 @@ def run_analysis():
     print("STARTING ANOMALY SOURCE LOCALIZATION ANALYSIS")
     print("="*80)
     
-    # Import the main module (assuming it's saved as anomaly_localization.py)
+    # Import the main module
     import sys
     import importlib.util
     
+    # Get the correct path to Source_Localization.py (in the same directory)
+    script_dir = Path(__file__).parent
+    source_loc_path = script_dir / "Source_Localization.py"
+    
     # Load the main module dynamically
-    spec = importlib.util.spec_from_file_location("anomaly_system", "Source_Localization.py")
-    if spec is None:
-        print("Error: Could not find anomaly_localization.py")
-        print("Please ensure the main implementation file is saved as 'anomaly_localization.py'")
+    spec = importlib.util.spec_from_file_location("anomaly_system", str(source_loc_path))
+    if spec is None or not source_loc_path.exists():
+        print(f"❌ Error: Could not find Source_Localization.py at {source_loc_path}")
+        print("Please ensure the file is in the src/test/ directory.")
         return
         
     anomaly_system = importlib.util.module_from_spec(spec)
@@ -261,10 +265,14 @@ def run_visualization_only():
     import sys
     import importlib.util
     
+    # Get the correct path to Source_Localization.py (in the same directory)
+    script_dir = Path(__file__).parent
+    source_loc_path = script_dir / "Source_Localization.py"
+    
     # Load the main module dynamically
-    spec = importlib.util.spec_from_file_location("anomaly_system", "Source_Localization.py")
-    if spec is None:
-        print("Error: Could not find Source_Localization.py")
+    spec = importlib.util.spec_from_file_location("anomaly_system", str(source_loc_path))
+    if spec is None or not source_loc_path.exists():
+        print(f"❌ Error: Could not find Source_Localization.py at {source_loc_path}")
         return
         
     anomaly_system = importlib.util.module_from_spec(spec)
@@ -285,7 +293,6 @@ def run_visualization_only():
 def main():
     """Main execution"""
     import sys
-    '''
     # Check for command-line arguments
     if len(sys.argv) > 1 and sys.argv[1] == '--visualize-only':
         print("Telecom Anomaly Source Localization System")
@@ -311,20 +318,22 @@ def main():
         print("Please fix data issues before proceeding.")
         return
     
-    # Save the main implementation
+    # Check if main implementation exists
     print("\n4. Preparing analysis system...")
     
-    # Check if main implementation exists
-    if not Path('Source_Localization.py').exists():
-        print("⚠ Warning: anomaly_localization.py not found!")
-        print("Please save the main implementation code as 'anomaly_localization.py'")
-        print("You can copy it from the first artifact provided.")
+    script_dir = Path(__file__).parent
+    source_loc_path = script_dir / "Source_Localization.py"
+    
+    if not source_loc_path.exists():
+        print(f"⚠ Warning: Source_Localization.py not found at {source_loc_path}!")
+        print("Please ensure Source_Localization.py is in the src/test/ directory.")
         return
      
     # Run analysis
     print("\n5. Running analysis...")
     run_analysis()
-    '''
+    '''    '''
+
     run_visualization_only()
 if __name__ == "__main__":
     main()
