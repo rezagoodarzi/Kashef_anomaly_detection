@@ -1,0 +1,127 @@
+# =============================================================================
+# Analysis Configuration
+# =============================================================================
+# Core analysis parameters for behavioral connectivity detection.
+# All variability lives here - no hard-coded logic in the application.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Correlation Analysis Parameters
+# -----------------------------------------------------------------------------
+correlation:
+  # Pearson correlation threshold (0.0 to 1.0)
+  # Pairs with correlation >= this value are considered correlated
+  pearson_threshold: 0.85
+  
+  # Composite score threshold (0.0 to 1.0)
+  # Combines multiple metrics with weights
+  composite_threshold: 0.7
+
+# -----------------------------------------------------------------------------
+# Change Point Detection (PELT Algorithm)
+# -----------------------------------------------------------------------------
+change_point:
+  # Penalty for adding change points (higher = fewer change points)
+  # Recommended range: 3.0 - 10.0
+  pelt_penalty: 5.0
+  
+  # Minimum signal length for change point detection
+  min_signal_length: 6
+  
+  # Minimum segment size between change points
+  min_segment_size: 3
+  
+  # Model for PELT algorithm: "rbf", "l1", "l2", "normal"
+  model: "rbf"
+
+# -----------------------------------------------------------------------------
+# Algorithm Weights (must sum to 1.0)
+# -----------------------------------------------------------------------------
+weights:
+  # Pearson correlation weight
+  pearson: 0.45
+  
+  # Difference correlation weight (rate of change similarity)
+  difference_correlation: 0.0
+  
+  # Change point alignment weight
+  change_point_alignment: 0.50
+  
+  # Direction alignment weight
+  direction_alignment: 0.05
+
+# -----------------------------------------------------------------------------
+# Data Processing Parameters
+# -----------------------------------------------------------------------------
+data_processing:
+  # Minimum data points required for a sector
+  min_data_points: 10
+  
+  # Maximum sectors to analyze (for performance)
+  max_sectors: 200
+  
+  # Priority slots for anomaly sectors
+  anomaly_sector_priority: 50
+  
+  # Default RSSI fill value for missing data
+  default_rssi_fill: -110.0
+  
+  # Remove daily pattern to avoid spurious correlations
+  remove_daily_pattern: false
+  
+  # Change point alignment tolerance (time steps)
+  alignment_tolerance: 2
+
+# -----------------------------------------------------------------------------
+# Database Query Parameters
+# -----------------------------------------------------------------------------
+database:
+  # Batch size for reading large datasets
+  batch_size: 10000
+  
+  # Query timeout in seconds
+  query_timeout: 300
+  
+  # Connection pool size
+  pool_size: 5
+
+# -----------------------------------------------------------------------------
+# Output Configuration
+# -----------------------------------------------------------------------------
+output:
+  # Output file names
+  connections_csv: "behavioral_connections.csv"
+  connections_json: "behavioral_connections.json"
+  changepoints_csv: "change_points.csv"
+  changepoints_json: "change_points.json"
+  
+  # Include detailed metrics in output
+  include_detailed_metrics: true
+  
+  # Round decimal places
+  decimal_places: 4
+
+# -----------------------------------------------------------------------------
+# Scheduling Configuration
+# -----------------------------------------------------------------------------
+scheduling:
+  # Run time (24-hour format)
+  run_hour: 2
+  run_minute: 0
+  
+  # Days lookback for processing
+  lookback_days: 1
+  
+  # Retry configuration
+  max_retries: 3
+  retry_delay_seconds: 300
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_directory: "logs"
+  max_log_files: 30
+

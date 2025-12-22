@@ -1,0 +1,158 @@
+# =============================================================================
+# Technology Configuration
+# =============================================================================
+# Defines per-technology behavior including table names, KPI mappings,
+# and anomaly thresholds.
+#
+# Structure:
+#   technology_name:
+#     table_name: PostgreSQL table name
+#     kpis: List of KPIs with their specific configurations
+#       - name: KPI identifier in database
+#         category: Logical KPI category
+#         anomaly_direction: 'higher_worse' or 'lower_worse'
+#         threshold: Anomaly threshold value
+#         aggregation: How to aggregate values ('mean', 'max', 'min', 'sum')
+# =============================================================================
+
+2g:
+  table_name: "pm_2g"
+  description: "2G GSM technology metrics"
+  kpis:
+    - name: "INTERFERENCE_RATIO_BAND4_5(HU_CELL)"
+      category: "Interference4,5"
+      anomaly_direction: "higher_worse"
+      threshold: 5.0
+      aggregation: "mean"
+      unit: "ratio"
+    
+    - name: "INTERFERENCE_RATIO_BAND6_7(HU_CELL)"
+      category: "Interference6,7"
+      anomaly_direction: "higher_worse"
+      threshold: 5.0
+      aggregation: "mean"
+      unit: "ratio"
+    
+    - name: "RXQUAL_DL(HU_CELL)"
+      category: "Quality"
+      anomaly_direction: "higher_worse"
+      threshold: 4.0
+      aggregation: "mean"
+      unit: "level"
+    
+    - name: "RXLEV_DL(HU_CELL)"
+      category: "Signal Level"
+      anomaly_direction: "lower_worse"
+      threshold: -100.0
+      aggregation: "mean"
+      unit: "dBm"
+
+3g:
+  table_name: "pm_3g"
+  description: "3G UMTS technology metrics"
+  kpis:
+    - name: "RTWP(UCELL)"
+      category: "RTWP"
+      anomaly_direction: "higher_worse"
+      threshold: -100.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "UL_INTERFERENCE(UCELL)"
+      category: "UL Interference"
+      anomaly_direction: "higher_worse"
+      threshold: -95.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "RSCP(UCELL)"
+      category: "Signal Strength"
+      anomaly_direction: "lower_worse"
+      threshold: -110.0
+      aggregation: "mean"
+      unit: "dBm"
+
+4g:
+  table_name: "pm_4g"
+  description: "4G LTE technology metrics"
+  kpis:
+    - name: "RSSI_PUCCH(EUCell_Eric)"
+      category: "PUCCH RSSI"
+      anomaly_direction: "higher_worse"
+      threshold: -105.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "RSSI_PUSCH(EUCell_Eric)"
+      category: "PUSCH RSSI"
+      anomaly_direction: "higher_worse"
+      threshold: -105.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "UL_INTERFERENCE(EUCell_Eric)"
+      category: "UL Interference"
+      anomaly_direction: "higher_worse"
+      threshold: -95.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "SINR_UL(EUCell_Eric)"
+      category: "UL SINR"
+      anomaly_direction: "lower_worse"
+      threshold: 5.0
+      aggregation: "mean"
+      unit: "dB"
+
+5g:
+  table_name: "pm_5g"
+  description: "5G NR technology metrics"
+  kpis:
+    - name: "RSSI_PUCCH(NRCell)"
+      category: "PUCCH RSSI"
+      anomaly_direction: "higher_worse"
+      threshold: -100.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "RSSI_PUSCH(NRCell)"
+      category: "PUSCH RSSI"
+      anomaly_direction: "higher_worse"
+      threshold: -100.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "UL_INTERFERENCE(NRCell)"
+      category: "UL Interference"
+      anomaly_direction: "higher_worse"
+      threshold: -90.0
+      aggregation: "mean"
+      unit: "dBm"
+    
+    - name: "SINR_UL(NRCell)"
+      category: "UL SINR"
+      anomaly_direction: "lower_worse"
+      threshold: 8.0
+      aggregation: "mean"
+      unit: "dB"
+
+# =============================================================================
+# Global KPI Category Mappings (for cross-technology analysis)
+# =============================================================================
+category_mappings:
+  interference:
+    - "Interference4,5"
+    - "Interference6,7"
+    - "UL Interference"
+    - "RTWP"
+  
+  rssi:
+    - "PUCCH RSSI"
+    - "PUSCH RSSI"
+  
+  signal_quality:
+    - "Quality"
+    - "Signal Level"
+    - "Signal Strength"
+    - "UL SINR"
+

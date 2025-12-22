@@ -1,0 +1,118 @@
+# =============================================================================
+# City Configuration
+# =============================================================================
+# Maps city names to cell name prefixes for SQL filtering.
+# This allows filtering directly in SQL without post-processing.
+#
+# Structure:
+#   city_name:
+#     prefixes: List of cell name prefixes (used with LIKE in SQL)
+#     timezone: City timezone for time-based processing
+#     region: Regional grouping (optional)
+# =============================================================================
+
+Tehran:
+  prefixes:
+    - "TH"
+    - "THR"
+  timezone: "Asia/Tehran"
+  region: "Central"
+  description: "Tehran Metropolitan Area"
+
+Isfahan:
+  prefixes:
+    - "IF"
+    - "ISF"
+  timezone: "Asia/Tehran"
+  region: "Central"
+  description: "Isfahan Province"
+
+Mashhad:
+  prefixes:
+    - "MH"
+    - "MSH"
+  timezone: "Asia/Tehran"
+  region: "Khorasan"
+  description: "Mashhad Metropolitan Area"
+
+Tabriz:
+  prefixes:
+    - "TB"
+    - "TBZ"
+  timezone: "Asia/Tehran"
+  region: "Azerbaijan"
+  description: "Tabriz Metropolitan Area"
+
+Shiraz:
+  prefixes:
+    - "SH"
+    - "SHZ"
+  timezone: "Asia/Tehran"
+  region: "Fars"
+  description: "Shiraz Metropolitan Area"
+
+Karaj:
+  prefixes:
+    - "KJ"
+    - "KRJ"
+  timezone: "Asia/Tehran"
+  region: "Alborz"
+  description: "Karaj Metropolitan Area (Alborz Province)"
+
+Ahvaz:
+  prefixes:
+    - "AH"
+    - "AHV"
+  timezone: "Asia/Tehran"
+  region: "Khuzestan"
+  description: "Ahvaz Metropolitan Area"
+
+Qom:
+  prefixes:
+    - "QM"
+    - "QOM"
+  timezone: "Asia/Tehran"
+  region: "Central"
+  description: "Qom Province"
+
+Kerman:
+  prefixes:
+    - "KR"
+    - "KRM"
+  timezone: "Asia/Tehran"
+  region: "Kerman"
+  description: "Kerman Province"
+
+Rasht:
+  prefixes:
+    - "RS"
+    - "RST"
+  timezone: "Asia/Tehran"
+  region: "Gilan"
+  description: "Rasht Metropolitan Area"
+
+# =============================================================================
+# Special City Groups (for batch processing)
+# =============================================================================
+city_groups:
+  all:
+    description: "All cities - no filtering"
+    cities: []  # Empty means no prefix filter
+  
+  major_cities:
+    description: "Top 5 major cities by population"
+    cities:
+      - Tehran
+      - Mashhad
+      - Isfahan
+      - Karaj
+      - Shiraz
+  
+  central_region:
+    description: "Central region cities"
+    cities:
+      - Tehran
+      - Isfahan
+      - Qom
+      - Karaj
+
