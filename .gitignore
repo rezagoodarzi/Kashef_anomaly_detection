@@ -1,0 +1,95 @@
+# =============================================================================
+# Large Data Files (GitHub limit: 100MB)
+# =============================================================================
+
+# Large CSV files
+*.csv
+!requirements*.csv
+
+# Large HTML files (visualization outputs)
+**/rssi_analysis.html
+**/network_topology.html
+**/behavioral_connectivity.html
+**/anomaly_map.html
+
+# Parquet files
+*.parquet
+
+# Pickle files
+*.pkl
+
+# RAR/ZIP archives
+*.rar
+*.zip
+*.7z
+
+# =============================================================================
+# Data Directories
+# =============================================================================
+data/
+anomaly_results/
+anomaly_results_pic/
+**/anomaly_results/
+**/anomaly_results_*/
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# =============================================================================
+# Jupyter Notebooks
+# =============================================================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# =============================================================================
+# IDE
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# =============================================================================
+# OS
+# =============================================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =============================================================================
+# Logs
+# =============================================================================
+*.log
+logs/
+
