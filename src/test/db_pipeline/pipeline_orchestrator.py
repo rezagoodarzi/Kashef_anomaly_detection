@@ -31,19 +31,36 @@ import pandas as pd
 import numpy as np
 
 # Import pipeline components
-from db_interface import (
-    IDatabaseInterface,
-    DatabaseConfig,
-    QueryParams,
-    DatabaseConnectionManager,
-    create_database_interface
-)
-from data_service import (
-    ConfigurationManager,
-    DataService,
-    AnalysisAdapter,
-    create_data_service
-)
+try:
+    # Try relative imports (when used as module)
+    from .db_interface import (
+        IDatabaseInterface,
+        DatabaseConfig,
+        QueryParams,
+        DatabaseConnectionManager,
+        create_database_interface
+    )
+    from .data_service import (
+        ConfigurationManager,
+        DataService,
+        AnalysisAdapter,
+        create_data_service
+    )
+except ImportError:
+    # Fall back to absolute imports (when run standalone)
+    from db_interface import (
+        IDatabaseInterface,
+        DatabaseConfig,
+        QueryParams,
+        DatabaseConnectionManager,
+        create_database_interface
+    )
+    from data_service import (
+        ConfigurationManager,
+        DataService,
+        AnalysisAdapter,
+        create_data_service
+    )
 
 # Setup logging
 logging.basicConfig(

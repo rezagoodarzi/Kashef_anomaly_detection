@@ -32,9 +32,16 @@ import json
 import threading
 
 # Import pipeline components
-from pipeline_orchestrator import PipelineOrchestrator, PipelineParams, PipelineResult
-from db_interface import DatabaseConfig
-from data_service import ConfigurationManager
+try:
+    # Try relative imports (when used as module)
+    from .pipeline_orchestrator import PipelineOrchestrator, PipelineParams, PipelineResult
+    from .db_interface import DatabaseConfig
+    from .data_service import ConfigurationManager
+except ImportError:
+    # Fall back to absolute imports (when run standalone)
+    from pipeline_orchestrator import PipelineOrchestrator, PipelineParams, PipelineResult
+    from db_interface import DatabaseConfig
+    from data_service import ConfigurationManager
 
 # Setup logging
 logging.basicConfig(
