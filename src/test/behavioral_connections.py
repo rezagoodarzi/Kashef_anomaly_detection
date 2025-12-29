@@ -47,6 +47,11 @@ class Config:
     PELT_PENALTY: float = 5.0  # Higher = fewer change points
     MIN_SIGNAL_LENGTH: int = 6
     
+    # Time window for delayed pattern detection
+    TIME_WINDOW_DAYS: float = 0 # Check ±1 day for delayed patterns
+    TIME_WINDOW_HOURS: float = 1.0  # If None, uses TIME_WINDOW_DAYS
+    ENABLE_TIME_SHIFT_CORRELATION: bool = True  # Enable cross-correlation with time shifts
+    
     # Weights for composite score
     WEIGHT_PEARSON: float = 0.45
     WEIGHT_DIFF_CORR: float = 0.0
@@ -325,41 +330,99 @@ def calculate_difference_correlation(series1: np.ndarray, series2: np.ndarray) -
 def calculate_change_point_alignment(
     cp1: List[int],
     cp2: List[int],
-    tolerance: int = 2
-) -> float:
+    timestamps1: List,
+    timestamps2: List,
+    config: Config,
+    tolerance: int = None
+) -> Tuple[float, float]:
     """
-    Calculate how well change points align between two sectors.
+    Calculate how well change points align between two sectors using time windows.
     
-    Two change points "align" if they occur within 'tolerance' time steps.
+    Two change points "align" if they occur within the configured time window.
+    Supports both index-based (legacy) and time-based alignment.
     
     Formula:
-    - For each CP in sector1, check if there's a matching CP in sector2 within ±tolerance
+    - For each CP in sector1, check if there's a matching CP in sector2 within time window
     - alignment_score = 2 * num_matched / (len(cp1) + len(cp2))
     
     Args:
-        cp1: Change points for sector 1
-        cp2: Change points for sector 2
-        tolerance: Maximum time difference for alignment
+        cp1: Change points for sector 1 (indices)
+        cp2: Change points for sector 2 (indices)
+        timestamps1: Timestamps for sector 1
+        timestamps2: Timestamps for sector 2
+        config: Configuration object with time window settings
+        tolerance: Maximum index difference (legacy, used if time window not available)
         
     Returns:
-        Alignment score (0 to 1)
+        (alignment_score, avg_time_lag_hours) where lag is average delay between aligned CPs
     """
     if not cp1 or not cp2:
-        return 0.0
+        return 0.0, 0.0
+    
+    # Calculate time window in hours
+    if config.TIME_WINDOW_HOURS is not None:
+        time_window_hours = config.TIME_WINDOW_HOURS
+    else:
+        time_window_hours = config.TIME_WINDOW_DAYS * 24.0
     
     matched = 0
+    time_lags = []
     cp2_set = set(cp2)
     
-    for cp in cp1:
-        # Check if any CP in sector2 is within tolerance
-        for offset in range(-tolerance, tolerance + 1):
-            if (cp + offset) in cp2_set:
-                matched += 1
-                break
+    # Convert timestamps to pandas if needed
+    try:
+        if timestamps1 and hasattr(timestamps1[0], 'timestamp'):
+            ts1 = [pd.Timestamp(t) if not isinstance(t, pd.Timestamp) else t for t in timestamps1]
+            ts2 = [pd.Timestamp(t) if not isinstance(t, pd.Timestamp) else t for t in timestamps2]
+            use_time_based = True
+        else:
+            use_time_based = False
+    except:
+        use_time_based = False
+    
+    for cp_idx in cp1:
+        if cp_idx >= len(timestamps1):
+            continue
+            
+        matched_cp = None
+        min_time_diff = float('inf')
+        
+        if use_time_based:
+            # Time-based alignment: check actual timestamps
+            cp_time = ts1[cp_idx]
+            
+            for cp2_idx in cp2:
+                if cp2_idx >= len(timestamps2):
+                    continue
+                    
+                cp2_time = ts2[cp2_idx]
+                time_diff = abs((cp_time - cp2_time).total_seconds() / 3600.0)  # hours
+                
+                if time_diff <= time_window_hours and time_diff < min_time_diff:
+                    min_time_diff = time_diff
+                    matched_cp = cp2_idx
+        else:
+            # Index-based alignment (fallback)
+            if tolerance is None:
+                # Estimate tolerance from time window (assume hourly data)
+                tolerance = int(time_window_hours)
+            
+            for offset in range(-tolerance, tolerance + 1):
+                if (cp_idx + offset) in cp2_set and (cp_idx + offset) >= 0:
+                    matched_cp = cp_idx + offset
+                    # Estimate time lag (assume hourly data)
+                    min_time_diff = abs(offset)
+                    break
+        
+        if matched_cp is not None:
+            matched += 1
+            time_lags.append(min_time_diff)
     
     # Jaccard-like score
-    score = (2 * matched) / (len(cp1) + len(cp2))
-    return min(1.0, score)
+    score = (2 * matched) / (len(cp1) + len(cp2)) if (len(cp1) + len(cp2)) > 0 else 0.0
+    avg_lag = np.mean(time_lags) if time_lags else 0.0
+    
+    return min(1.0, score), avg_lag
 
 
 def calculate_direction_alignment(
@@ -367,13 +430,16 @@ def calculate_direction_alignment(
     signal2: np.ndarray,
     cp1: List[int],
     cp2: List[int],
-    tolerance: int = 2
+    timestamps1: List,
+    timestamps2: List,
+    config: Config,
+    tolerance: int = None
 ) -> float:
     """
-    Calculate if aligned change points have the SAME DIRECTION.
+    Calculate if aligned change points have the SAME DIRECTION using time windows.
     
     This is crucial for telecom: if two sectors both spike UP at the same time,
-    it indicates a common interference source.
+    it indicates a common interference source. Now supports time-delayed patterns.
     
     Returns:
         Proportion of aligned changes with same direction (0 to 1)
@@ -381,24 +447,162 @@ def calculate_direction_alignment(
     if not cp1 or not cp2:
         return 0.0
     
+    # Calculate time window in hours
+    if config.TIME_WINDOW_HOURS is not None:
+        time_window_hours = config.TIME_WINDOW_HOURS
+    else:
+        time_window_hours = config.TIME_WINDOW_DAYS * 24.0
+    
     same_direction_count = 0
     total_aligned = 0
+    cp2_set = set(cp2)
     
-    for cp in cp1:
-        # Find closest CP in sector2
-        for offset in range(-tolerance, tolerance + 1):
-            if (cp + offset) in cp2:
-                total_aligned += 1
+    # Convert timestamps to pandas if needed
+    try:
+        if timestamps1 and hasattr(timestamps1[0], 'timestamp'):
+            ts1 = [pd.Timestamp(t) if not isinstance(t, pd.Timestamp) else t for t in timestamps1]
+            ts2 = [pd.Timestamp(t) if not isinstance(t, pd.Timestamp) else t for t in timestamps2]
+            use_time_based = True
+        else:
+            use_time_based = False
+    except:
+        use_time_based = False
+    
+    for cp_idx in cp1:
+        if cp_idx >= len(signal1) or cp_idx >= len(timestamps1):
+            continue
+            
+        matched_cp = None
+        
+        if use_time_based:
+            # Time-based alignment
+            cp_time = ts1[cp_idx]
+            min_time_diff = float('inf')
+            
+            for cp2_idx in cp2:
+                if cp2_idx >= len(timestamps2):
+                    continue
+                    
+                cp2_time = ts2[cp2_idx]
+                time_diff = abs((cp_time - cp2_time).total_seconds() / 3600.0)  # hours
                 
-                # Get directions
-                _, dir1 = get_change_magnitude_and_direction(signal1, cp)
-                _, dir2 = get_change_magnitude_and_direction(signal2, cp + offset)
-                
-                if dir1 == dir2:
-                    same_direction_count += 1
-                break
+                if time_diff <= time_window_hours and time_diff < min_time_diff:
+                    min_time_diff = time_diff
+                    matched_cp = cp2_idx
+        else:
+            # Index-based alignment (fallback)
+            if tolerance is None:
+                tolerance = int(time_window_hours)
+            
+            for offset in range(-tolerance, tolerance + 1):
+                if (cp_idx + offset) in cp2_set and (cp_idx + offset) >= 0 and (cp_idx + offset) < len(signal2):
+                    matched_cp = cp_idx + offset
+                    break
+        
+        if matched_cp is not None:
+            total_aligned += 1
+            
+            # Get directions
+            _, dir1 = get_change_magnitude_and_direction(signal1, cp_idx)
+            _, dir2 = get_change_magnitude_and_direction(signal2, matched_cp)
+            
+            if dir1 == dir2:
+                same_direction_count += 1
     
     return same_direction_count / total_aligned if total_aligned > 0 else 0.0
+
+
+def calculate_time_shifted_correlation(
+    series1: np.ndarray,
+    series2: np.ndarray,
+    timestamps1: List,
+    timestamps2: List,
+    config: Config
+) -> Tuple[float, float, float]:
+    """
+    Calculate correlation with time shifts to find delayed patterns.
+    
+    Tests correlations with series2 shifted forward/backward in time to find
+    the optimal lag that maximizes correlation.
+    
+    Args:
+        series1: First time series
+        series2: Second time series
+        timestamps1: Timestamps for series1
+        timestamps2: Timestamps for series2
+        config: Configuration with time window settings
+        
+    Returns:
+        (best_correlation, optimal_lag_hours, p_value)
+    """
+    if not config.ENABLE_TIME_SHIFT_CORRELATION:
+        corr, p_val = calculate_pearson_correlation(series1, series2)
+        return corr, 0.0, p_val
+    
+    # Calculate max shift in hours
+    if config.TIME_WINDOW_HOURS is not None:
+        max_shift_hours = config.TIME_WINDOW_HOURS
+    else:
+        max_shift_hours = config.TIME_WINDOW_DAYS * 24.0
+    
+    # Estimate data frequency (hours between samples)
+    try:
+        if len(timestamps1) > 1:
+            if hasattr(timestamps1[0], 'timestamp'):
+                ts1 = [pd.Timestamp(t) if not isinstance(t, pd.Timestamp) else t for t in timestamps1]
+                time_diffs = [(ts1[i+1] - ts1[i]).total_seconds() / 3600.0 
+                             for i in range(min(10, len(ts1)-1))]
+                avg_freq_hours = np.median(time_diffs) if time_diffs else 1.0
+            else:
+                avg_freq_hours = 1.0  # Default to hourly
+        else:
+            avg_freq_hours = 1.0
+    except:
+        avg_freq_hours = 1.0
+    
+    # Calculate max shift in indices
+    max_shift_indices = int(max_shift_hours / max(avg_freq_hours, 0.1))
+    max_shift_indices = min(max_shift_indices, len(series1) // 4, len(series2) // 4)  # Limit to 25% of data
+    
+    best_corr = -1.0
+    best_lag = 0.0
+    best_p = 1.0
+    
+    # Test different shifts
+    for shift in range(-max_shift_indices, max_shift_indices + 1):
+        if shift == 0:
+            shifted_s2 = series2
+        elif shift > 0:
+            # Shift series2 forward (series2 appears later)
+            if shift >= len(series2):
+                continue
+            shifted_s2 = series2[shift:]
+            shifted_s1 = series1[:-shift] if shift < len(series1) else series1
+        else:
+            # Shift series2 backward (series2 appears earlier)
+            shift_abs = abs(shift)
+            if shift_abs >= len(series2):
+                continue
+            shifted_s2 = series2[:-shift_abs] if shift_abs < len(series2) else series2
+            shifted_s1 = series1[shift_abs:]
+        
+        # Ensure same length
+        min_len = min(len(shifted_s1), len(shifted_s2))
+        if min_len < 3:
+            continue
+            
+        shifted_s1 = shifted_s1[:min_len]
+        shifted_s2 = shifted_s2[:min_len]
+        
+        # Calculate correlation
+        corr, p_val = calculate_pearson_correlation(shifted_s1, shifted_s2)
+        
+        if corr > best_corr:
+            best_corr = corr
+            best_lag = shift * avg_freq_hours  # Convert to hours
+            best_p = p_val
+    
+    return best_corr, best_lag, best_p
 
 
 def calculate_composite_score(
@@ -435,11 +639,12 @@ def analyze_sector_pair(
     config: Config
 ) -> Optional[Dict[str, Any]]:
     """
-    Analyze a pair of sectors using all algorithms.
+    Analyze a pair of sectors using all algorithms with time window support.
     
     Uses:
     - signal (deseasonalized) for correlation calculations
     - signal_raw for direction alignment (actual spike direction)
+    - time windows to detect delayed patterns (day before/after)
     
     Returns:
         Dictionary with all correlation metrics, or None if not correlated
@@ -455,12 +660,25 @@ def analyze_sector_pair(
     cp1 = sector1_data['change_points']
     cp2 = sector2_data['change_points']
     
-    # Calculate all metrics
-    pearson, p_value = calculate_pearson_correlation(signal1, signal2)
+    timestamps1 = sector1_data.get('timestamps', [])
+    timestamps2 = sector2_data.get('timestamps', [])
+    
+    # Calculate time-shifted correlation (finds optimal lag)
+    pearson, optimal_lag_hours, p_value = calculate_time_shifted_correlation(
+        signal1, signal2, timestamps1, timestamps2, config
+    )
+    
     diff_corr = calculate_difference_correlation(signal1, signal2)
-    change_align = calculate_change_point_alignment(cp1, cp2)
+    
+    # Calculate change point alignment with time windows
+    change_align, avg_time_lag = calculate_change_point_alignment(
+        cp1, cp2, timestamps1, timestamps2, config
+    )
+    
     # Use RAW signal for direction (we want actual UP/DOWN, not residual direction)
-    direction_align = calculate_direction_alignment(signal1_raw, signal2_raw, cp1, cp2)
+    direction_align = calculate_direction_alignment(
+        signal1_raw, signal2_raw, cp1, cp2, timestamps1, timestamps2, config
+    )
     
     # Calculate composite score
     composite = calculate_composite_score(
@@ -477,8 +695,10 @@ def analyze_sector_pair(
         'composite_score': round(composite, 4),
         'pearson_correlation': round(pearson, 4),
         'pearson_p_value': round(p_value, 6),
+        'optimal_time_lag_hours': round(optimal_lag_hours, 2),  # New: time lag for best correlation
         'difference_correlation': round(diff_corr, 4),
         'change_point_alignment': round(change_align, 4),
+        'avg_change_point_lag_hours': round(avg_time_lag, 2),  # New: average lag between aligned CPs
         'direction_alignment': round(direction_align, 4),
         'sector_1_change_points': len(cp1),
         'sector_2_change_points': len(cp2),
@@ -604,7 +824,8 @@ def find_all_connections(
 
 def build_change_points_output(
     sector_data: Dict[str, Dict[str, Any]],
-    connections: List[Dict[str, Any]]
+    connections: List[Dict[str, Any]],
+    config: Config
 ) -> List[Dict[str, Any]]:
     """
     Build detailed change points data with correlated sectors.
@@ -654,27 +875,87 @@ def build_change_points_output(
             value_before = float(signal[before_idx])
             value_after = float(signal[after_idx])
             
-            # Find correlated sectors with aligned change points
+            # Find correlated sectors with aligned change points (using time windows)
             aligned_sectors = []
             if sector_id in correlated_lookup:
+                # Get time window from config
+                if config.TIME_WINDOW_HOURS is not None:
+                    time_window_hours = config.TIME_WINDOW_HOURS
+                else:
+                    time_window_hours = config.TIME_WINDOW_DAYS * 24.0
+                
+                # Estimate data frequency for index-based fallback
+                try:
+                    if timestamps and len(timestamps) > 1:
+                        if hasattr(timestamps[0], 'timestamp'):
+                            ts = [pd.Timestamp(t) if not isinstance(t, pd.Timestamp) else t for t in timestamps]
+                            time_diffs = [(ts[i+1] - ts[i]).total_seconds() / 3600.0 
+                                         for i in range(min(10, len(ts)-1))]
+                            avg_freq_hours = np.median(time_diffs) if time_diffs else 1.0
+                        else:
+                            avg_freq_hours = 1.0
+                    else:
+                        avg_freq_hours = 1.0
+                except:
+                    avg_freq_hours = 1.0
+                tolerance_indices = max(2, int(time_window_hours / max(avg_freq_hours, 0.1)))
+                
                 for corr_info in correlated_lookup[sector_id]:
                     corr_sector = corr_info['sector']
                     if corr_sector in sector_data:
                         corr_cps = sector_data[corr_sector]['change_points']
-                        # Check if this sector has a change point within ±2 of current
+                        corr_timestamps = sector_data[corr_sector].get('timestamps', [])
+                        
+                        # Check if this sector has a change point within time window
                         for corr_cp in corr_cps:
-                            if abs(corr_cp - cp_idx) <= 2:
-                                # Use RAW signal for actual RSSI values
-                                corr_signal = sector_data[corr_sector].get('signal_raw', sector_data[corr_sector]['signal'])
-                                corr_mag, corr_dir = get_change_magnitude_and_direction(corr_signal, corr_cp)
-                                aligned_sectors.append({
-                                    'sector': corr_sector,
-                                    'change_point_index': corr_cp,
-                                    'direction': 'UP' if corr_dir > 0 else 'DOWN',
-                                    'magnitude': round(corr_mag, 2),
-                                    'same_direction': corr_dir == direction
-                                })
-                                break
+                            # Time-based check if timestamps available
+                            if timestamps and corr_timestamps and cp_idx < len(timestamps) and corr_cp < len(corr_timestamps):
+                                try:
+                                    cp_time = pd.Timestamp(timestamps[cp_idx]) if not isinstance(timestamps[cp_idx], pd.Timestamp) else timestamps[cp_idx]
+                                    corr_cp_time = pd.Timestamp(corr_timestamps[corr_cp]) if not isinstance(corr_timestamps[corr_cp], pd.Timestamp) else corr_timestamps[corr_cp]
+                                    time_diff_hours = abs((cp_time - corr_cp_time).total_seconds() / 3600.0)
+                                    
+                                    if time_diff_hours <= time_window_hours:
+                                        # Use RAW signal for actual RSSI values
+                                        corr_signal = sector_data[corr_sector].get('signal_raw', sector_data[corr_sector]['signal'])
+                                        corr_mag, corr_dir = get_change_magnitude_and_direction(corr_signal, corr_cp)
+                                        aligned_sectors.append({
+                                            'sector': corr_sector,
+                                            'change_point_index': corr_cp,
+                                            'time_lag_hours': round(time_diff_hours, 2),
+                                            'direction': 'UP' if corr_dir > 0 else 'DOWN',
+                                            'magnitude': round(corr_mag, 2),
+                                            'same_direction': corr_dir == direction
+                                        })
+                                        break
+                                except:
+                                    # Fallback to index-based
+                                    if abs(corr_cp - cp_idx) <= tolerance_indices:
+                                        corr_signal = sector_data[corr_sector].get('signal_raw', sector_data[corr_sector]['signal'])
+                                        corr_mag, corr_dir = get_change_magnitude_and_direction(corr_signal, corr_cp)
+                                        aligned_sectors.append({
+                                            'sector': corr_sector,
+                                            'change_point_index': corr_cp,
+                                            'time_lag_hours': round(abs(corr_cp - cp_idx) * avg_freq_hours, 2),
+                                            'direction': 'UP' if corr_dir > 0 else 'DOWN',
+                                            'magnitude': round(corr_mag, 2),
+                                            'same_direction': corr_dir == direction
+                                        })
+                                        break
+                            else:
+                                # Index-based fallback
+                                if abs(corr_cp - cp_idx) <= tolerance_indices:
+                                    corr_signal = sector_data[corr_sector].get('signal_raw', sector_data[corr_sector]['signal'])
+                                    corr_mag, corr_dir = get_change_magnitude_and_direction(corr_signal, corr_cp)
+                                    aligned_sectors.append({
+                                        'sector': corr_sector,
+                                        'change_point_index': corr_cp,
+                                        'time_lag_hours': round(abs(corr_cp - cp_idx) * avg_freq_hours, 2),
+                                        'direction': 'UP' if corr_dir > 0 else 'DOWN',
+                                        'magnitude': round(corr_mag, 2),
+                                        'same_direction': corr_dir == direction
+                                    })
+                                    break
             
             change_points_output.append({
                 'sector': sector_id,
@@ -851,6 +1132,12 @@ def generate_behavioral_connections(
     print("  2. Difference Correlation (weight: {:.0%})".format(config.WEIGHT_DIFF_CORR))
     print("  3. PELT Change Point Alignment (weight: {:.0%})".format(config.WEIGHT_CHANGE_ALIGN))
     print("  4. Direction Alignment (weight: {:.0%})".format(config.WEIGHT_DIRECTION))
+    print("\nTime Window Settings:")
+    if config.TIME_WINDOW_HOURS is not None:
+        print(f"  Time window: ±{config.TIME_WINDOW_HOURS} hours")
+    else:
+        print(f"  Time window: ±{config.TIME_WINDOW_DAYS} days ({config.TIME_WINDOW_DAYS * 24} hours)")
+    print(f"  Time-shift correlation: {'Enabled' if config.ENABLE_TIME_SHIFT_CORRELATION else 'Disabled'}")
     
     # Step 1: Load data
     print("\n[1/6] Loading data...")
@@ -875,7 +1162,7 @@ def generate_behavioral_connections(
     
     # Step 5: Build change points output
     print("\n[5/6] Building change points output...")
-    change_points = build_change_points_output(sector_data, connections)
+    change_points = build_change_points_output(sector_data, connections, config)
     print(f"      Documented {len(change_points)} change points")
     
     # Step 6: Save outputs
