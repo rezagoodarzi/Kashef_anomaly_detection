@@ -44,7 +44,7 @@ class Config:
     COMPOSITE_THRESHOLD: float = 0.7  # Lower threshold for composite score
     
     # Change point detection
-    PELT_PENALTY: float = 5.0  # Higher = fewer change points
+    PELT_PENALTY: float = 3.0  # Higher = fewer change points
     MIN_SIGNAL_LENGTH: int = 6
     
     # Time window for delayed pattern detection
