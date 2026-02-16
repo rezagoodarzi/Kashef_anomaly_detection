@@ -1219,7 +1219,7 @@ def generate_behavioral_connections(
         print(f"   Avg composite score: {np.mean([c['composite_score'] for c in connections]):.3f}")
         print(f"   Avg change alignment: {np.mean([c['change_point_alignment'] for c in connections]):.3f}")
     
-    print("\n📍 CHANGE POINTS SUMMARY:")
+    print("\n CHANGE POINTS SUMMARY:")
     print(f"   Total change points: {len(change_points)}")
     with_aligned = sum(1 for cp in change_points if cp['num_aligned_sectors'] > 0)
     print(f"   With aligned sectors: {with_aligned} ({100*with_aligned/len(change_points):.1f}%)" if change_points else "   With aligned sectors: 0")
@@ -1244,11 +1244,11 @@ if __name__ == "__main__":
             data_path=DATA_PATH,
             output_dir=OUTPUT_DIR
         )
-        print("\n✓ Successfully created all outputs!")
+        print("\n Successfully created all outputs")
         
     except FileNotFoundError as e:
         print(f"\n✗ Error: File not found - {e}")
     except Exception as e:
-        print(f"\n✗ Error: {e}")
+        print(f"\n Error: {e}")
         import traceback
         traceback.print_exc()
