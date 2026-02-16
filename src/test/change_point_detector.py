@@ -24,10 +24,10 @@ except ImportError:
 @dataclass
 class Config:
     # Change point sensitivity (higher = fewer change points, lower = more)
-    PELT_PENALTY: float = 10.0
+    PELT_PENALTY: float = 3.0
 
     # Minimum data points between two consecutive change points
-    MIN_SEGMENT_SIZE: int = 2
+    MIN_SEGMENT_SIZE: int = 1
 
     # Sectors with fewer data points than this are skipped
     MIN_DATA_POINTS: int = 6
@@ -279,17 +279,17 @@ if __name__ == "__main__":
 
     # --- Customize here ---
     config = Config(
-        PELT_PENALTY=10.0,          # PELT sensitivity (higher = fewer CPs)
+        PELT_PENALTY=1.0,          # PELT sensitivity (higher = fewer CPs)
         ALIGNMENT_WINDOW_HOURS=1.0, # ± hours to count aligned sectors
-        VALUE_WINDOW=2,             # points for value_before / value_after
+        VALUE_WINDOW=3,             # points for value_before / value_after
 
         # ── Threshold options ──
         # Option 1: 'manual'   → fixed magnitude cutoff
         # Option 2: 'adaptive' → auto threshold per sector (sensitivity × std)
         # Option 3: 'none'     → keep all change points
-        THRESHOLD_MODE='manual',
-        MANUAL_THRESHOLD=6.0,       # used when mode='manual' (dB)
-        ADAPTIVE_SENSITIVITY=1.5,   # used when mode='adaptive' (lower=more sensitive)
+        THRESHOLD_MODE='adaptive',
+        MANUAL_THRESHOLD=5.0,       # used when mode='manual' (dB)
+        ADAPTIVE_SENSITIVITY=0.5,   # used when mode='adaptive' (lower=more sensitive)
     )
 
     find_change_points(DATA_PATH, OUTPUT_DIR, config)
