@@ -7,15 +7,10 @@ Outputs change_points.csv with value before/after change and aligned sector coun
 
 import numpy as np
 import pandas as pd
+import ruptures as rpt
 from pathlib import Path
 from dataclasses import dataclass
 from multiprocessing import Pool, cpu_count
-
-try:
-    import ruptures as rpt
-except ImportError:
-    raise ImportError("Install ruptures: pip install ruptures")
-
 
 # =============================================================================
 # CONFIG – Tune these parameters
@@ -24,7 +19,7 @@ except ImportError:
 @dataclass
 class Config:
     # Change point sensitivity (higher = fewer change points, lower = more)
-    PELT_PENALTY: float = 3.0
+    PELT_PENALTY: float = 1
 
     # Minimum data points between two consecutive change points
     MIN_SEGMENT_SIZE: int = 1
@@ -33,7 +28,7 @@ class Config:
     MIN_DATA_POINTS: int = 6
 
     # Window (number of points) used to compute value_before / value_after
-    VALUE_WINDOW: int = 2
+    VALUE_WINDOW: int = 1
 
     # Time window (± hours) to count how many other sectors also changed
     ALIGNMENT_WINDOW_HOURS: float = 1.0
@@ -42,14 +37,14 @@ class Config:
     # 'manual'   → keep CPs with magnitude > MANUAL_THRESHOLD
     # 'adaptive' → keep CPs with magnitude > ADAPTIVE_SENSITIVITY × sector_std
     # 'none'     → keep all CPs (no magnitude filter)
-    THRESHOLD_MODE: str = 'manual'
+    THRESHOLD_MODE: str = 'adaptive'
 
     # Manual mode: fixed magnitude threshold (dB)
     MANUAL_THRESHOLD: float = 6.0
 
     # Adaptive mode: multiplier on each sector's own std deviation
     # Lower = more sensitive (keeps smaller changes), Higher = stricter
-    ADAPTIVE_SENSITIVITY: float = 1.5
+    ADAPTIVE_SENSITIVITY: float = 0.8
 
     # Column names
     RSSI_COL: str = 'RSSI_PUCCH(EUCell_Eric)(CRA)'
@@ -93,7 +88,6 @@ def _process_one_sector(args):
     """
     sector, signal, penalty, min_seg, min_dp, w, mode, manual_thresh, adaptive_sens = args
 
-    # Detect change points
     if len(signal) < min_dp or np.std(signal) == 0:
         return [], 0
 
@@ -101,7 +95,6 @@ def _process_one_sector(args):
     cps = rpt.Pelt(model="rbf", min_size=min_seg).fit(normed).predict(pen=penalty)
     cps = cps[:-1]
 
-    # Magnitude threshold
     sector_std = float(np.std(signal))
     if mode == 'manual':
         mag_threshold = manual_thresh
@@ -169,10 +162,8 @@ def find_change_points(data_path: str, output_dir: str, cfg: Config = None) -> p
     """
     cfg = cfg or Config()
 
-    # 1. Load data
     df = load_data(data_path, cfg)
 
-    # 2. Pivot → rows = timestamps, columns = sectors
     pivot = (
         df.pivot_table(index=cfg.DATE_COL, columns=cfg.SECTOR_COL,
                        values=cfg.RSSI_COL, aggfunc='mean')
@@ -198,8 +189,6 @@ def find_change_points(data_path: str, output_dir: str, cfg: Config = None) -> p
         print(f"  Threshold mode: NONE (keep all change points)")
     print(f"  Workers: {n_workers} CPU cores")
 
-    # 3. Detect change points per sector (parallel)
-    # Build args for each sector
     worker_args = [
         (sector, pivot[sector].values, cfg.PELT_PENALTY, cfg.MIN_SEGMENT_SIZE,
          cfg.MIN_DATA_POINTS, w, mode, cfg.MANUAL_THRESHOLD, cfg.ADAPTIVE_SENSITIVITY)
@@ -246,19 +235,16 @@ def find_change_points(data_path: str, output_dir: str, cfg: Config = None) -> p
 
     print(f"Found {len(cp_df):,} change points")
 
-    # 4. Find aligned sectors
     print("Finding aligned sectors...")
     counts, names = find_aligned_sectors(cp_df, cfg.ALIGNMENT_WINDOW_HOURS)
     cp_df['num_aligned_sectors'] = counts
     cp_df['aligned_sectors'] = names
 
-    # 5. Save
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     csv_path = out / 'change_points.csv'
     cp_df.to_csv(csv_path, index=False)
 
-    # Summary
     with_align = (cp_df['num_aligned_sectors'] > 0).sum()
     print(f"\n--- Done ---")
     print(f"Total change points : {len(cp_df):,}")
@@ -280,15 +266,15 @@ if __name__ == "__main__":
     # --- Customize here ---
     config = Config(
         PELT_PENALTY=1.0,          # PELT sensitivity (higher = fewer CPs)
-        ALIGNMENT_WINDOW_HOURS=1.0, # ± hours to count aligned sectors
-        VALUE_WINDOW=3,             # points for value_before / value_after
+        ALIGNMENT_WINDOW_HOURS=0, # ± hours to count aligned sectors
+        VALUE_WINDOW=1,             # points for value_before / value_after
 
         # ── Threshold options ──
         # Option 1: 'manual'   → fixed magnitude cutoff
         # Option 2: 'adaptive' → auto threshold per sector (sensitivity × std)
         # Option 3: 'none'     → keep all change points
         THRESHOLD_MODE='adaptive',
-        MANUAL_THRESHOLD=5.0,       # used when mode='manual' (dB)
+        MANUAL_THRESHOLD=6.0,       # used when mode='manual' (dB)
         ADAPTIVE_SENSITIVITY=0.5,   # used when mode='adaptive' (lower=more sensitive)
     )
 
